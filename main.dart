@@ -39,14 +39,13 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  int _currentIndex = 1; // 默认停留在设备控制页
-  bool _isLanMode = true; // true: 局域网, false: 异地外网
-  bool _isDoorClosed = true; // 上盖状态
-  bool _isLightOn = false; // 工作灯开关
-  bool _isEngraving = false; // 雕刻进行中
+  int _currentIndex = 1;
+  bool _isLanMode = true;
+  bool _isDoorClosed = true;
+  bool _isLightOn = false;
+  bool _isEngraving = false;
 
-  // 模拟雕刻进度
-  double _progress = 0.35; // 35%
+  double _progress = 0.35;
   int _activeTool = 1;
 
   @override
@@ -56,7 +55,6 @@ class _AppShellState extends State<AppShell> {
         titleSpacing: 10,
         title: Row(
           children: [
-            // 2. 局域网 / 外网动态切换标识
             InkWell(
               onTap: () {
                 setState(() => _isLanMode = !_isLanMode);
@@ -87,7 +85,6 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             const SizedBox(width: 6),
-            // 4. 机器物理上盖状态监测
             InkWell(
               onTap: () => setState(() => _isDoorClosed = !_isDoorClosed),
               child: Container(
@@ -98,7 +95,7 @@ class _AppShellState extends State<AppShell> {
                 ),
                 child: Row(
                   children: [
-                    Icon(_isDoorClosed ? Icons.door_front_door : Icons.door_back_door, size: 12, color: _isDoorClosed ? Colors.white70 : Colors.redAccent),
+                    Icon(_isDoorClosed ? Icons.sensor_door : Icons.sensor_door_outlined, size: 12, color: _isDoorClosed ? Colors.white70 : Colors.redAccent),
                     const SizedBox(width: 2),
                     Text(
                       _isDoorClosed ? '上盖关' : '盖打开!',
@@ -109,7 +106,6 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             const Spacer(),
-            // 5. 醒目超大急停按键 (E-STOP)
             ElevatedButton.icon(
               onPressed: () => _showEmergencyStopDialog(context),
               icon: const Icon(Icons.error_outline, color: Colors.white, size: 18),
@@ -127,7 +123,6 @@ class _AppShellState extends State<AppShell> {
       ),
       body: Column(
         children: [
-          // 异地外网警告提示横幅
           if (!_isLanMode)
             Container(
               color: Colors.orange.shade900.withOpacity(0.8),
@@ -141,7 +136,6 @@ class _AppShellState extends State<AppShell> {
                 ],
               ),
             ),
-          // 开盖警告横幅
           if (!_isDoorClosed)
             Container(
               color: Colors.red.shade900,
@@ -222,7 +216,6 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-// 1. 监控看板页面
 class MonitorPage extends StatelessWidget {
   final bool isLightOn;
   final VoidCallback onLightToggle;
@@ -237,7 +230,6 @@ class MonitorPage extends StatelessWidget {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // 20cm 龙门架侧斜视频流窗口
             AspectRatio(
               aspectRatio: 16 / 9,
               child: Container(
@@ -266,7 +258,6 @@ class MonitorPage extends StatelessWidget {
                         child: const Text('● LIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                       ),
                     ),
-                    // 4. 工作灯控制
                     Positioned(
                       bottom: 10, right: 10,
                       child: ElevatedButton.icon(
@@ -287,7 +278,6 @@ class MonitorPage extends StatelessWidget {
   }
 }
 
-// 2. 设备控制页 (含 1. 雕刻进度看板 + 远程暂停/停止 + 2. LAN/WAN 控轴限制 + 4. 灯光)
 class ControlPage extends StatefulWidget {
   final bool isLanMode;
   final bool isLightOn;
@@ -314,7 +304,6 @@ class ControlPage extends StatefulWidget {
 
 class _ControlPageState extends State<ControlPage> {
   double _selectedStep = 1.0;
-  bool _isLaserOn = false;
   bool _isPaused = false;
   double _x = 120.50, _y = 85.20, _z = 15.00;
 
@@ -327,17 +316,12 @@ class _ControlPageState extends State<ControlPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. 雕刻进度看板 (当雕刻中时高亮呈现)
             if (widget.isEngraving) ...[
               _buildEngravingProgressCard(),
               const SizedBox(height: 16),
             ],
-
-            // 刀仓状态
             _buildToolMagazineSection(),
             const SizedBox(height: 16),
-
-            // Jog 摇杆控制 (局域网模式允许，外网模式屏蔽)
             Opacity(
               opacity: widget.isLanMode ? 1.0 : 0.35,
               child: AbsorbPointer(
@@ -346,8 +330,6 @@ class _ControlPageState extends State<ControlPage> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // 快捷功能按键 (灯光 / 模拟控制)
             _buildQuickActionsSection(),
           ],
         ),
@@ -355,7 +337,6 @@ class _ControlPageState extends State<ControlPage> {
     );
   }
 
-  // 1. 雕刻进度看板 UI
   Widget _buildEngravingProgressCard() {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -395,7 +376,6 @@ class _ControlPageState extends State<ControlPage> {
             ],
           ),
           const Divider(color: Colors.white12, height: 16),
-          // 5. 远程暂停与终止功能
           Row(
             children: [
               Expanded(
@@ -422,7 +402,6 @@ class _ControlPageState extends State<ControlPage> {
     );
   }
 
-  // 可视化刀仓 (带有当前加工刀具状态指示)
   Widget _buildToolMagazineSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -451,7 +430,7 @@ class _ControlPageState extends State<ControlPage> {
         decoration: BoxDecoration(
           color: isWorking ? color.withOpacity(0.2) : const Color(0xFF1E1E1E),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isWorking ? color : Colors.white12, width: isWorking ? 2 : 1),
+          border: Border.all(color: isWorking ? color : Colors.white12, width: isWorking ? 2.0 : 1.0),
         ),
         child: Column(
           children: [
@@ -564,7 +543,6 @@ class _ControlPageState extends State<ControlPage> {
   }
 }
 
-// 3. 模型库页面 (包含双入口 Tab)
 class ModelHubPage extends StatefulWidget {
   const ModelHubPage({Key? key}) : super(key: key);
 
@@ -579,6 +557,12 @@ class _ModelHubPageState extends State<ModelHubPage> with SingleTickerProviderSt
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   @override
@@ -604,7 +588,6 @@ class _ModelHubPageState extends State<ModelHubPage> with SingleTickerProviderSt
       body: TabBarView(
         controller: _tabController,
         children: [
-          // 入口 1: 官方公共模型库
           ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -613,7 +596,6 @@ class _ModelHubPageState extends State<ModelHubPage> with SingleTickerProviderSt
               _buildModelCard(context, "复古雕花茶杯垫", "90 × 90 × 5 mm", "推荐: 亚克力/胡桃木"),
             ],
           ),
-          // 入口 2: 个人云端工程 (Web 网页端上传的文件)
           ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -661,7 +643,6 @@ class _ModelHubPageState extends State<ModelHubPage> with SingleTickerProviderSt
   }
 }
 
-// 雕刻前 4 步傻瓜式向导弹窗 (含 1. 动态图标指示)
 class EngravingWizardModal extends StatefulWidget {
   const EngravingWizardModal({Key? key}) : super(key: key);
 
@@ -757,7 +738,6 @@ class _EngravingWizardModalState extends State<EngravingWizardModal> {
               ],
             ),
           ),
-          // 4. 滑动解锁
           Container(
             height: 48,
             width: double.infinity,
@@ -794,7 +774,6 @@ class _EngravingWizardModalState extends State<EngravingWizardModal> {
     );
   }
 
-  // 带动态状态图标的步骤外壳
   Widget _buildStepBox(String num, String title, bool isFinished, Widget child) {
     return Container(
       padding: const EdgeInsets.all(10),
@@ -817,7 +796,6 @@ class _EngravingWizardModalState extends State<EngravingWizardModal> {
   }
 }
 
-// 个人中心页面
 class ProfilePage extends StatelessWidget {
   const ProfilePage({Key? key}) : super(key: key);
 
