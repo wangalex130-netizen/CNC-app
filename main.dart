@@ -169,7 +169,7 @@ class _MainDashboardState extends State<MainDashboard> {
           ElevatedButton.icon(
             onPressed: () => _showESTOPDialog(context),
             icon: const Icon(Icons.dangerous, color: Colors.white, size: 16),
-            label: const Text('急停 E-STOP', style: TextStyle(fontWeight: FontWeight.black, fontSize: 11)),
+            label: const Text('急停 E-STOP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red.shade800,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -798,7 +798,7 @@ class JobStudioView extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text('正在执行: 《铝合金散热壳加工.gcode》', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                      Text('${(progress * 100).toInt()}%', style: const TextStyle(color: Color(0xFFFF6B00), fontWeight: FontWeight.black, fontSize: 16)),
+                      Text('${(progress * 100).toInt()}%', style: const TextStyle(color: Color(0xFFFF6B00), fontWeight: FontWeight.bold, fontSize: 16)),
                     ],
                   ),
                   const SizedBox(height: 8),
