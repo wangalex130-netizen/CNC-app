@@ -1,5 +1,5 @@
 name: smart_cnc
-description: 包覆款桌面 CNC 智能控制 App（友好化重设计）
+description: A friendly controller app for desktop CNC machines (Wi-Fi / GRBL).
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,12 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.2
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.0
 
 flutter:
   uses-material-design: true
