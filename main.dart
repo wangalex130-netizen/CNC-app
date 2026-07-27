@@ -1,1185 +1,791 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 
-/// ============================================================
-/// 包覆款桌面 CNC 智能控制 App（友好化重设计 · 单文件版）
-/// 原 8 个文件已合并于此，直接替换你仓库里的 lib/main.dart 即可
-/// ============================================================
-
-// ----------------------------- 工具函数 -----------------------------
-String formatDuration(int totalSeconds) {
-  final s = totalSeconds < 0 ? 0 : totalSeconds;
-  final m = s ~/ 60;
-  final sec = s % 60;
-  return '${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
-}
-
-String statusText(String status) {
-  switch (status) {
-    case 'RUN':
-      return '工作中';
-    case 'ALARM':
-      return '报警';
-    case 'HOLD':
-      return '已暂停';
-    default:
-      return '空闲';
-  }
-}
-
-Color statusColor(String status) {
-  switch (status) {
-    case 'RUN':
-      return const Color(0xFF19B36B);
-    case 'ALARM':
-      return const Color(0xFFE5484D);
-    case 'HOLD':
-      return const Color(0xFFF2A33C);
-    default:
-      return const Color(0xFF9AA0A6);
-  }
-}
-
-BoxDecoration cardDecoration() {
-  return BoxDecoration(
-    color: Colors.white,
-    borderRadius: BorderRadius.circular(16),
-    boxShadow: const [
-      BoxShadow(color: Color(0x0D000000), blurRadius: 10, offset: Offset(0, 2)),
-    ],
-  );
-}
-
-Widget sectionTitle(String text) {
-  return Text(
-    text,
-    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1A1D1F)),
-  );
-}
-
-// ----------------------------- 常量 -----------------------------
-const List<Map<String, String>> kTools = [
-  {'slot': '1', 'name': '3.175 平底刀'},
-  {'slot': '2', 'name': '60° V 型刀'},
-  {'slot': '3', 'name': '2.0 球头刀'},
-  {'slot': '4', 'name': '自动对刀块'},
-];
-
-const List<Map<String, String>> kProjects = [
-  {'name': '铝合金散热壳加工', 'size': '100 × 60 × 15 mm', 'tools': 'T1 平底刀', 'duration': '75'},
-  {'name': '木质榫卯手机支架', 'size': '150 × 80 × 12 mm', 'tools': 'T1 / T2', 'duration': '90'},
-  {'name': 'PCB 电路板雕刻 V2', 'size': '80 × 50 × 1.6 mm', 'tools': 'T2 V 型刀', 'duration': '60'},
-  {'name': '亚克力收纳盒', 'size': '120 × 90 × 40 mm', 'tools': 'T1 / T3', 'duration': '120'},
-];
-
-// ----------------------------- 共享状态 -----------------------------
-class MachineState {
-  final bool isLanMode;
-  final String status;
-  final bool doorClosed;
-  final bool lightOn;
-  final bool airOn;
-  final bool dustOn;
-  final double x, y, z;
-  final int tool;
-  final double feedOverride;
-  final double spindleOverride;
-  final bool jobRunning;
-  final bool jobPaused;
-  final double jobProgress;
-  final String jobName;
-  final int jobElapsedSec;
-  final int jobDurationSec;
-  final List<String> activityLog;
-
-  const MachineState({
-    required this.isLanMode,
-    required this.status,
-    required this.doorClosed,
-    required this.lightOn,
-    required this.airOn,
-    required this.dustOn,
-    required this.x,
-    required this.y,
-    required this.z,
-    required this.tool,
-    required this.feedOverride,
-    required this.spindleOverride,
-    required this.jobRunning,
-    required this.jobPaused,
-    required this.jobProgress,
-    required this.jobName,
-    required this.jobElapsedSec,
-    required this.jobDurationSec,
-    required this.activityLog,
-  });
-
-  factory MachineState.initial() => MachineState(
-        isLanMode: true,
-        status: 'IDLE',
-        doorClosed: true,
-        lightOn: true,
-        airOn: false,
-        dustOn: false,
-        x: 120.450,
-        y: 85.200,
-        z: -12.500,
-        tool: 1,
-        feedOverride: 100,
-        spindleOverride: 100,
-        jobRunning: false,
-        jobPaused: false,
-        jobProgress: 0,
-        jobName: '',
-        jobElapsedSec: 0,
-        jobDurationSec: 75,
-        activityLog: const ['设备已就绪，等待指令'],
-      );
-
-  MachineState copyWith({
-    bool? isLanMode,
-    String? status,
-    bool? doorClosed,
-    bool? lightOn,
-    bool? airOn,
-    bool? dustOn,
-    double? x,
-    double? y,
-    double? z,
-    int? tool,
-    double? feedOverride,
-    double? spindleOverride,
-    bool? jobRunning,
-    bool? jobPaused,
-    double? jobProgress,
-    String? jobName,
-    int? jobElapsedSec,
-    int? jobDurationSec,
-    List<String>? activityLog,
-  }) {
-    return MachineState(
-      isLanMode: isLanMode ?? this.isLanMode,
-      status: status ?? this.status,
-      doorClosed: doorClosed ?? this.doorClosed,
-      lightOn: lightOn ?? this.lightOn,
-      airOn: airOn ?? this.airOn,
-      dustOn: dustOn ?? this.dustOn,
-      x: x ?? this.x,
-      y: y ?? this.y,
-      z: z ?? this.z,
-      tool: tool ?? this.tool,
-      feedOverride: feedOverride ?? this.feedOverride,
-      spindleOverride: spindleOverride ?? this.spindleOverride,
-      jobRunning: jobRunning ?? this.jobRunning,
-      jobPaused: jobPaused ?? this.jobPaused,
-      jobProgress: jobProgress ?? this.jobProgress,
-      jobName: jobName ?? this.jobName,
-      jobElapsedSec: jobElapsedSec ?? this.jobElapsedSec,
-      jobDurationSec: jobDurationSec ?? this.jobDurationSec,
-      activityLog: activityLog ?? this.activityLog,
-    );
-  }
-}
-
-class MachineActions {
-  final VoidCallback toggleLight;
-  final VoidCallback toggleAir;
-  final VoidCallback toggleDust;
-  final VoidCallback toggleDoor;
-  final void Function(double dx, double dy, double dz) jog;
-  final void Function(int) selectTool;
-  final void Function(double) setFeed;
-  final void Function(double) setSpindle;
-  final void Function(String, int) startJob;
-  final VoidCallback pauseJob;
-  final VoidCallback resumeJob;
-  final VoidCallback abortJob;
-  final void Function(String) addLog;
-  final VoidCallback requestPairing;
-  final VoidCallback estop;
-  final VoidCallback clearAlarm;
-
-  const MachineActions({
-    required this.toggleLight,
-    required this.toggleAir,
-    required this.toggleDust,
-    required this.toggleDoor,
-    required this.jog,
-    required this.selectTool,
-    required this.setFeed,
-    required this.setSpindle,
-    required this.startJob,
-    required this.pauseJob,
-    required this.resumeJob,
-    required this.abortJob,
-    required this.addLog,
-    required this.requestPairing,
-    required this.estop,
-    required this.clearAlarm,
-  });
-}
-
-// ----------------------------- 程序入口 -----------------------------
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MyApp());
+  runApp(const SmartCncApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+class SmartCncApp extends StatelessWidget {
+  const SmartCncApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Smart CNC',
+      title: 'Smart CNC Pro',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        primaryColor: const Color(0xFF19B36B),
-        scaffoldBackgroundColor: const Color(0xFFF4F6F8),
-        appBarTheme: const AppBarTheme(backgroundColor: Colors.white, foregroundColor: Color(0xFF1A1D1F), elevation: 0),
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF19B36B), brightness: Brightness.light),
-        cardColor: Colors.white,
-        sliderTheme: SliderThemeData(
-          activeTrackColor: const Color(0xFF19B36B),
-          thumbColor: const Color(0xFF19B36B),
-          inactiveTrackColor: const Color(0xFFE3E8EC),
+      theme: ThemeData.dark().copyWith(
+        primaryColor: const Color(0xFFFF6700), // 小米/拓竹橙
+        scaffoldBackgroundColor: const Color(0xFF0F1117),
+        cardColor: const Color(0xFF1A1D26),
+        appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF141720), elevation: 0),
+        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+          backgroundColor: Color(0xFF141720),
+          selectedItemColor: Color(0xFFFF6700),
+          unselectedItemColor: Colors.white38,
         ),
       ),
-      home: const MainScaffold(),
+      home: const MainDashboard(),
     );
   }
 }
 
-class MainScaffold extends StatefulWidget {
-  const MainScaffold({Key? key}) : super(key: key);
+class MainDashboard extends StatefulWidget {
+  const MainDashboard({Key? key}) : super(key: key);
+
   @override
-  State<MainScaffold> createState() => _MainScaffoldState();
+  State<MainDashboard> createState() => _MainDashboardState();
 }
 
-class _MainScaffoldState extends State<MainScaffold> {
-  int _tab = 0;
-  late MachineState _s;
-  Timer? _jobTimer;
+class _MainDashboardState extends State<MainDashboard> {
+  int _tabIndex = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    _s = MachineState.initial();
-  }
+  // 设备状态
+  String _machineStatus = '就绪'; // 就绪, 正在雕刻, 暂停中, 异常告警
+  bool _isLanMode = true;
+  bool _isDoorClosed = true;
+  bool _isLightOn = true;
+  bool _isAirBlastOn = false;
+  bool _isDustCollectorOn = false;
+
+  // DRO 坐标与工件原点设定 (WCS G54)
+  double _xPos = 120.450, _yPos = 85.200, _zPos = -12.500;
+  double _feedrateOverride = 100; // 进给倍率 10% - 200%
+  double _spindleOverride = 100;  // 主轴转速倍率 50% - 150%
+  int _currentTool = 1;
+
+  // 雕刻任务仿真
+  bool _isExecutingJob = false;
+  bool _isJobPaused = false;
+  double _jobProgress = 0.0;
+  String _activeJobTitle = '';
+  Timer? _jobProgressTimer;
 
   @override
   void dispose() {
-    _jobTimer?.cancel();
+    _jobProgressTimer?.cancel();
     super.dispose();
   }
 
-  String _stamp() {
-    final n = DateTime.now();
-    return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}:${n.second.toString().padLeft(2, '0')}';
-  }
-
-  void _log(String msg) {
+  // 开始执行雕刻
+  void _startJob(String jobName) {
+    _jobProgressTimer?.cancel();
     setState(() {
-      _s = _s.copyWith(activityLog: ['${_stamp()}  $msg', ..._s.activityLog].take(50).toList());
+      _activeJobTitle = jobName;
+      _isExecutingJob = true;
+      _isJobPaused = false;
+      _jobProgress = 0.0;
+      _machineStatus = '正在雕刻';
+      _tabIndex = 0; // 自动跳转至首页看进度
     });
-  }
 
-  void _toggleLight() => setState(() => _s = _s.copyWith(lightOn: !_s.lightOn));
-  void _toggleAir() => setState(() => _s = _s.copyWith(airOn: !_s.airOn));
-  void _toggleDust() => setState(() => _s = _s.copyWith(dustOn: !_s.dustOn));
-  void _toggleDoor() => setState(() => _s = _s.copyWith(doorClosed: !_s.doorClosed));
-
-  void _jog(double dx, double dy, double dz) {
-    setState(() => _s = _s.copyWith(x: _s.x + dx, y: _s.y + dy, z: _s.z + dz));
-  }
-
-  void _selectTool(int t) {
-    setState(() => _s = _s.copyWith(tool: t));
-    _log('已切换至 T$t 刀具');
-  }
-
-  void _setFeed(double v) => setState(() => _s = _s.copyWith(feedOverride: v));
-  void _setSpindle(double v) => setState(() => _s = _s.copyWith(spindleOverride: v));
-
-  /// 开始加工：用定时器推进进度，完成后自动回到空闲（修复"卡在执行中"）
-  void _startJob(String name, int durationSec) {
-    if (_s.jobRunning) return;
-    _jobTimer?.cancel();
-    setState(() => _s = _s.copyWith(
-          jobRunning: true,
-          jobPaused: false,
-          jobProgress: 0,
-          jobElapsedSec: 0,
-          jobDurationSec: durationSec,
-          jobName: name,
-          status: 'RUN',
-        ));
-    _log('开始加工：$name');
-    _jobTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (_s.jobPaused) return;
-      final elapsed = _s.jobElapsedSec + 250;
-      final p = elapsed / 1000 / _s.jobDurationSec;
-      if (p >= 1.0) {
-        _jobTimer?.cancel();
-        _jobTimer = null;
-        setState(() => _s = _s.copyWith(jobProgress: 1.0, jobRunning: false, jobElapsedSec: _s.jobDurationSec * 1000, status: 'IDLE'));
-        _log('加工完成：$name');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$name 加工完成 ✅'), backgroundColor: const Color(0xFF19B36B)),
-          );
-        }
-      } else {
-        setState(() => _s = _s.copyWith(jobProgress: p, jobElapsedSec: elapsed));
+    // 仿真模拟加工进度推进
+    _jobProgressTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
+      if (!_isJobPaused && _isExecutingJob) {
+        setState(() {
+          _jobProgress += 0.02;
+          if (_jobProgress >= 1.0) {
+            _jobProgress = 1.0;
+            _isExecutingJob = false;
+            _machineStatus = '就绪';
+            timer.cancel();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('🎉 雕刻任务《$_activeJobTitle》已顺利完成！'), backgroundColor: const Color(0xFF00AE42)),
+            );
+          }
+        });
       }
     });
   }
 
-  void _pauseJob() {
-    if (!_s.jobRunning || _s.jobPaused) return;
-    setState(() => _s = _s.copyWith(jobPaused: true, status: 'HOLD'));
-    _log('已暂停加工');
+  // 暂停 / 继续
+  void _togglePauseJob() {
+    setState(() {
+      _isJobPaused = !_isJobPaused;
+      _machineStatus = _isJobPaused ? '暂停中' : '正在雕刻';
+    });
   }
 
-  void _resumeJob() {
-    if (!_s.jobRunning || !_s.jobPaused) return;
-    setState(() => _s = _s.copyWith(jobPaused: false, status: 'RUN'));
-    _log('继续加工');
+  // 终止任务
+  void _stopJob() {
+    _jobProgressTimer?.cancel();
+    setState(() {
+      _isExecutingJob = false;
+      _isJobPaused = false;
+      _jobProgress = 0.0;
+      _machineStatus = '就绪';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已终止加工，主轴停转并安全抬刀。'), backgroundColor: Colors.orangeAccent),
+    );
   }
 
-  void _abortJob() {
-    _jobTimer?.cancel();
-    _jobTimer = null;
-    final name = _s.jobName;
-    setState(() => _s = _s.copyWith(jobRunning: false, jobPaused: false, jobProgress: 0, status: 'IDLE'));
-    _log('已终止加工：$name');
-  }
-
-  void _estop() {
-    _jobTimer?.cancel();
-    _jobTimer = null;
-    setState(() => _s = _s.copyWith(jobRunning: false, jobPaused: false, jobProgress: 0, status: 'ALARM', doorClosed: false));
-    _log('⚠ 紧急停止已触发，机器已锁停');
-  }
-
-  void _clearAlarm() {
-    setState(() => _s = _s.copyWith(status: 'IDLE', doorClosed: true));
-    _log('报警已解除，机器恢复空闲');
-  }
-
-  void _openPairing() {
+  void _openPairingModal() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const PairingSheet(),
+      builder: (_) => const DevicePairingModal(),
     );
   }
 
-  void _confirmEstop() {
-    showDialog(
+  void _showPrepareJobWizard(BuildContext context, String jobTitle) {
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('确认紧急停止？'),
-        content: const Text('将立即切断主轴与运动驱动，机器会锁停。仅在紧急情况下使用。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              Navigator.pop(ctx);
-              _estop();
-            },
-            child: const Text('紧急停止'),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => JobPreparationModal(
+        jobTitle: jobTitle,
+        currentX: _xPos,
+        currentY: _yPos,
+        onConfirmStart: () {
+          Navigator.pop(context);
+          _startJob(jobTitle);
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: _buildTopAppBar(),
+      body: Column(
+        children: [
+          _buildGlobalStatusHeader(),
+          Expanded(
+            child: IndexedStack(
+              index: _tabIndex,
+              children: [
+                // 1. 首页：监视与雕刻进度
+                DeviceHomeView(
+                  isExecuting: _isExecutingJob,
+                  isPaused: _isJobPaused,
+                  jobTitle: _activeJobTitle,
+                  progress: _jobProgress,
+                  isLightOn: _isLightOn,
+                  isAirOn: _isAirBlastOn,
+                  isDustOn: _isDustCollectorOn,
+                  onToggleLight: () => setState(() => _isLightOn = !_isLightOn),
+                  onToggleAir: () => setState(() => _isAirBlastOn = !_isAirBlastOn),
+                  onToggleDust: () => setState(() => _isDustCollectorOn = !_isDustCollectorOn),
+                  onPauseToggle: _togglePauseJob,
+                  onStopJob: _stopJob,
+                ),
+                // 2. 轴控与对原点 (设置 X/Y/Z 工件原点)
+                MotionControlView(
+                  x: _xPos, y: _yPos, z: _zPos,
+                  isLanMode: _isLanMode,
+                  currentTool: _currentTool,
+                  onSetZeroX: () => setState(() => _xPos = 0.0),
+                  onSetZeroY: () => setState(() => _yPos = 0.0),
+                  onSetZeroZ: () => setState(() => _zPos = 0.0),
+                  onSetAllZero: () => setState(() { _xPos = 0; _yPos = 0; _zPos = 0; }),
+                  onUpdateCoords: (nx, ny, nz) => setState(() { _xPos = nx; _yPos = ny; _zPos = nz; }),
+                  onSelectTool: (t) => setState(() => _currentTool = t),
+                ),
+                // 3. 创作模型库 (点击准备加工 ➔ 唤起向导)
+                ModelHubView(
+                  onLaunchJobWizard: (title) => _showPrepareJobWizard(context, title),
+                ),
+                // 4. 设备服务与管理 (原点之外的常规维护)
+                DeviceServicesView(
+                  onOpenPairing: _openPairingModal,
+                ),
+              ],
+            ),
           ),
+          if (_isExecutingJob) _buildOverrideControlBar(),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _tabIndex,
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: const Color(0xFFFF6700),
+        unselectedItemColor: Colors.white38,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+        unselectedLabelStyle: const TextStyle(fontSize: 11),
+        onTap: (i) => setState(() => _tabIndex = i),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.videocam_outlined), activeIcon: Icon(Icons.videocam), label: '雕刻监视'),
+          BottomNavigationBarItem(icon: Icon(Icons.gamepad_outlined), activeIcon: Icon(Icons.gamepad), label: '对机与原点'),
+          BottomNavigationBarItem(icon: Icon(Icons.grid_view_outlined), activeIcon: Icon(Icons.grid_view), label: '模型库'),
+          BottomNavigationBarItem(icon: Icon(Icons.build_outlined), activeIcon: Icon(Icons.build), label: '工具与维护'),
         ],
       ),
     );
   }
 
-  MachineActions _actions() => MachineActions(
-        toggleLight: _toggleLight,
-        toggleAir: _toggleAir,
-        toggleDust: _toggleDust,
-        toggleDoor: _toggleDoor,
-        jog: _jog,
-        selectTool: _selectTool,
-        setFeed: _setFeed,
-        setSpindle: _setSpindle,
-        startJob: _startJob,
-        pauseJob: _pauseJob,
-        resumeJob: _resumeJob,
-        abortJob: _abortJob,
-        addLog: _log,
-        requestPairing: _openPairing,
-        estop: _estop,
-        clearAlarm: _clearAlarm,
-      );
-
-  PreferredSizeWidget _buildAppBar() {
+  PreferredSizeWidget _buildTopAppBar() {
     return AppBar(
-      titleSpacing: 12,
+      titleSpacing: 16,
       title: Row(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: const Color(0xFF19B36B).withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
-            child: const Text('Smart CNC 3020', style: TextStyle(color: Color(0xFF19B36B), fontSize: 13, fontWeight: FontWeight.bold)),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6700).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFF6700).withOpacity(0.6)),
+            ),
+            child: const Text('SmartCNC 3020', style: TextStyle(color: Color(0xFFFF6700), fontSize: 13, fontWeight: FontWeight.bold)),
           ),
           const SizedBox(width: 8),
           InkWell(
-            onTap: _openPairing,
+            onTap: _openPairingModal,
+            borderRadius: BorderRadius.circular(8),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: Colors.green.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(
+                color: _isLanMode ? const Color(0xFF00AE42).withOpacity(0.15) : Colors.orange.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _isLanMode ? const Color(0xFF00AE42) : Colors.orangeAccent),
+              ),
               child: Row(
                 children: [
-                  Icon(Icons.wifi, size: 13, color: Colors.green.shade700),
+                  Icon(Icons.wifi, size: 12, color: _isLanMode ? const Color(0xFF00AE42) : Colors.orangeAccent),
                   const SizedBox(width: 4),
-                  Text(_s.isLanMode ? '已连接' : '远程', style: TextStyle(fontSize: 11, color: Colors.green.shade700, fontWeight: FontWeight.w600)),
-                  const Icon(Icons.arrow_drop_down, size: 14, color: Colors.black54),
+                  Text(_isLanMode ? '局域网直连 (1ms)' : '远程访问', style: TextStyle(fontSize: 11, color: _isLanMode ? const Color(0xFF00AE42) : Colors.orangeAccent, fontWeight: FontWeight.bold)),
+                  const Icon(Icons.keyboard_arrow_down, size: 14, color: Colors.white54),
                 ],
               ),
             ),
           ),
           const Spacer(),
-          TextButton.icon(
-            onPressed: _confirmEstop,
-            icon: const Icon(Icons.power_settings_new, color: Colors.red, size: 16),
-            label: const Text('急停', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+          IconButton(
+            onPressed: () => _showESTOPDialog(context),
+            icon: const Icon(Icons.report_problem, color: Colors.redAccent, size: 22),
+            tooltip: '紧急停止',
           ),
         ],
       ),
     );
   }
 
-  Widget _buildNavBar() {
-    const items = [
-      BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: '首页'),
-      BottomNavigationBarItem(icon: Icon(Icons.tune_outlined), activeIcon: Icon(Icons.tune), label: '控制台'),
-      BottomNavigationBarItem(icon: Icon(Icons.widgets_outlined), activeIcon: Icon(Icons.widgets), label: '作品'),
-      BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: '我的'),
-    ];
-    return BottomNavigationBar(
-      currentIndex: _tab,
-      type: BottomNavigationBarType.fixed,
-      selectedItemColor: const Color(0xFF19B36B),
-      unselectedItemColor: Colors.black45,
-      selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
-      unselectedLabelStyle: const TextStyle(fontSize: 11),
-      backgroundColor: Colors.white,
-      elevation: 8,
-      onTap: (i) => setState(() => _tab = i),
-      items: items,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final actions = _actions();
-    return Scaffold(
-      appBar: _buildAppBar(),
-      body: IndexedStack(
-        index: _tab,
-        children: [
-          HomeScreen(state: _s, actions: actions, onNavigate: (i) => setState(() => _tab = i)),
-          ControlScreen(state: _s, actions: actions),
-          ProjectsScreen(state: _s, actions: actions, onNavigate: (i) => setState(() => _tab = i)),
-          MoreScreen(state: _s, actions: actions),
-        ],
-      ),
-      bottomNavigationBar: _buildNavBar(),
-    );
-  }
-}
-
-// ----------------------------- 配网向导 -----------------------------
-class PairingSheet extends StatefulWidget {
-  const PairingSheet({Key? key}) : super(key: key);
-  @override
-  State<PairingSheet> createState() => _PairingSheetState();
-}
-
-class _PairingSheetState extends State<PairingSheet> {
-  int _step = 0;
-  bool _scanning = false;
-  String? _device;
-  final _ssid = TextEditingController(text: '我的Wi-Fi_2.4G');
-  final _pass = TextEditingController();
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildGlobalStatusHeader() {
+    Color statusColor = _machineStatus == '正在雕刻' ? const Color(0xFF00AE42) : (_machineStatus == '异常告警' ? Colors.redAccent : Colors.amberAccent);
     return Container(
-      height: MediaQuery.of(context).size.height * 0.78,
-      padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      color: const Color(0xFF181B24),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('连接我的 CNC', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.black45)),
+              Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
+              const SizedBox(width: 8),
+              Text('设备状态: $_machineStatus', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+              const SizedBox(width: 16),
+              GestureDetector(
+                onTap: () => setState(() => _isDoorClosed = !_isDoorClosed),
+                child: Row(
+                  children: [
+                    Icon(_isDoorClosed ? Icons.security : Icons.warning_amber, size: 14, color: _isDoorClosed ? Colors.white54 : Colors.redAccent),
+                    const SizedBox(width: 4),
+                    Text(_isDoorClosed ? '防护盖闭合' : '防护盖开启!', style: TextStyle(color: _isDoorClosed ? Colors.white54 : Colors.redAccent, fontSize: 11)),
+                  ],
+                ),
+              ),
             ],
           ),
-          _stepIndicator(),
-          const SizedBox(height: 12),
-          Expanded(child: _step == 0 ? _scanStep() : _step == 1 ? _wifiStep() : _doneStep()),
+          Text(_isExecutingJob ? '主轴: 12,000 RPM' : '主轴: 待机', style: const TextStyle(color: Colors.white70, fontSize: 11)),
         ],
       ),
     );
   }
 
-  Widget _stepIndicator() {
-    return Row(
-      children: List.generate(3, (i) {
-        final active = i <= _step;
-        return Expanded(
-          child: Container(
-            height: 4,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            decoration: BoxDecoration(color: active ? const Color(0xFF19B36B) : const Color(0xFFE3E8EC), borderRadius: BorderRadius.circular(2)),
-          ),
-        );
-      }),
-    );
-  }
-
-  Widget _scanStep() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('第 1 步 · 打开手机蓝牙，确保 CNC 已通电', style: TextStyle(color: Colors.black54, fontSize: 13)),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          height: 46,
-          child: FilledButton.icon(
-            onPressed: () async {
-              setState(() => _scanning = true);
-              await Future.delayed(const Duration(seconds: 2));
-              if (!mounted) return;
-              setState(() {
-                _scanning = false;
-                _device = 'SmartCNC-3020-A88F';
-              });
-            },
-            icon: _scanning
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.bluetooth_searching),
-            label: Text(_scanning ? '正在搜索…' : '搜索附近设备'),
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (_device != null)
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: const Color(0xFF19B36B).withOpacity(0.08), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF19B36B).withOpacity(0.4))),
-            child: Row(
-              children: [
-                const Icon(Icons.precision_manufacturing, color: Color(0xFF19B36B)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_device!, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      const Text('信号强 · 等待连接', style: TextStyle(color: Colors.black45, fontSize: 12)),
-                    ],
-                  ),
-                ),
-                FilledButton(onPressed: () => setState(() => _step = 1), child: const Text('连接')),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _wifiStep() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('第 2 步 · 选择 2.4G Wi-Fi 完成联网', style: TextStyle(color: Colors.black54, fontSize: 13)),
-        const SizedBox(height: 16),
-        TextField(controller: _ssid, decoration: const InputDecoration(labelText: 'Wi-Fi 名称', filled: true, fillColor: Color(0xFFF4F6F8))),
-        const SizedBox(height: 12),
-        TextField(controller: _pass, obscureText: true, decoration: const InputDecoration(labelText: 'Wi-Fi 密码', filled: true, fillColor: Color(0xFFF4F6F8))),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          height: 46,
-          child: FilledButton(onPressed: () => setState(() => _step = 2), child: const Text('完成连接', style: TextStyle(fontWeight: FontWeight.bold))),
-        ),
-      ],
-    );
-  }
-
-  Widget _doneStep() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Icon(Icons.check_circle, color: Color(0xFF19B36B), size: 64),
-        const SizedBox(height: 14),
-        const Text('连接成功！', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        const SizedBox(height: 6),
-        const Text('已通过局域网直连，控制低延迟', style: TextStyle(color: Colors.black45, fontSize: 13)),
-        const SizedBox(height: 24),
-        SizedBox(
-          width: 220,
-          height: 44,
-          child: FilledButton(onPressed: () => Navigator.pop(context), child: const Text('开始使用', style: TextStyle(fontWeight: FontWeight.bold))),
-        ),
-      ],
-    );
-  }
-
-  @override
-  void dispose() {
-    _ssid.dispose();
-    _pass.dispose();
-    super.dispose();
-  }
-}
-
-// ----------------------------- 首页 -----------------------------
-class HomeScreen extends StatelessWidget {
-  final MachineState state;
-  final MachineActions actions;
-  final void Function(int) onNavigate;
-  const HomeScreen({Key? key, required this.state, required this.actions, required this.onNavigate}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _statusCard(),
-          const SizedBox(height: 16),
-          _cameraCard(),
-          if (state.jobRunning) ...[
-            const SizedBox(height: 16),
-            _runningCard(),
-          ],
-          const SizedBox(height: 16),
-          _quickActions(),
-          const SizedBox(height: 16),
-          _startWorkCard(),
-          const SizedBox(height: 16),
-          _activityCard(),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-
-  Widget _statusCard() {
-    final c = statusColor(state.status);
+  Widget _buildOverrideControlBar() {
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [c.withOpacity(0.14), Colors.white], begin: Alignment.topLeft, end: Alignment.bottomRight),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: c.withOpacity(0.3)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: const BoxDecoration(
+        color: Color(0xFF141720),
+        border: Border(top: BorderSide(color: Colors.white10)),
       ),
       child: Row(
         children: [
-          Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: c)),
-          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Smart CNC 3020', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                Text(state.isLanMode ? '局域网已连接 · 低延迟' : '远程连接 · 45ms', style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                Text('进给速度: ${_feedrateOverride.toInt()}%', style: const TextStyle(color: Colors.white60, fontSize: 10)),
+                Slider(
+                  value: _feedrateOverride, min: 10, max: 200, divisions: 19,
+                  activeColor: const Color(0xFFFF6700),
+                  onChanged: (v) => setState(() => _feedrateOverride = v),
+                ),
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(20)),
-            child: Text(statusText(state.status), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('主轴转速: ${_spindleOverride.toInt()}%', style: const TextStyle(color: Colors.white60, fontSize: 10)),
+                Slider(
+                  value: _spindleOverride, min: 50, max: 150, divisions: 10,
+                  activeColor: Colors.cyanAccent,
+                  onChanged: (v) => setState(() => _spindleOverride = v),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _cameraCard() {
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: Container(
-        decoration: BoxDecoration(color: const Color(0xFF1A1D1F), borderRadius: BorderRadius.circular(16)),
-        child: Stack(
+  void _showESTOPDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF261414),
+        title: const Row(
           children: [
-            const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.videocam_outlined, size: 40, color: Colors.white70),
-                  SizedBox(height: 6),
-                  Text('实时加工画面', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                ],
-              ),
-            ),
-            Positioned(
-              top: 12,
-              left: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(6)),
-                child: const Text('● LIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-              ),
-            ),
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: OutlinedButton.icon(
-                onPressed: actions.toggleLight,
-                icon: Icon(state.lightOn ? Icons.lightbulb : Icons.lightbulb_outline, size: 14, color: state.lightOn ? Colors.amber : Colors.white70),
-                label: Text(state.lightOn ? '舱灯 开' : '舱灯 关', style: const TextStyle(fontSize: 11)),
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white30), backgroundColor: Colors.black45),
-              ),
-            ),
+            Icon(Icons.report_problem, color: Colors.redAccent),
+            SizedBox(width: 8),
+            Text('紧急停止切断', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
           ],
         ),
+        content: const Text('下发最高优先级急停指令：主轴与三轴驱动将立刻物理断电！'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消', style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade800),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _stopJob();
+            },
+            child: const Text('确认急停', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _runningCard() {
-    final elapsedSec = (state.jobDurationSec * state.jobProgress).round();
-    final remainSec = (state.jobDurationSec * (1 - state.jobProgress)).round();
-    return Container(
+// -----------------------------------------------------------------------------
+// 1. 首页：监视与雕刻控制
+// -----------------------------------------------------------------------------
+class DeviceHomeView extends StatelessWidget {
+  final bool isExecuting, isPaused;
+  final String jobTitle;
+  final double progress;
+  final bool isLightOn, isAirOn, isDustOn;
+  final VoidCallback onToggleLight, onToggleAir, onToggleDust;
+  final VoidCallback onPauseToggle, onStopJob;
+
+  const DeviceHomeView({
+    Key? key,
+    required this.isExecuting, required this.isPaused, required this.jobTitle, required this.progress,
+    required this.isLightOn, required this.isAirOn, required this.isDustOn,
+    required this.onToggleLight, required this.onToggleAir, required this.onToggleDust,
+    required this.onPauseToggle, required this.onStopJob,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
       padding: const EdgeInsets.all(16),
-      decoration: cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.precision_manufacturing, color: Color(0xFF19B36B)),
-              const SizedBox(width: 8),
-              Expanded(child: Text(state.jobName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
-              Text('${(state.jobProgress * 100).toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF19B36B))),
-            ],
+      children: [
+        // 摄像头 Live 画面
+        Container(
+          height: 200,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white10),
           ),
-          const SizedBox(height: 10),
-          LinearProgressIndicator(value: state.jobProgress, backgroundColor: const Color(0xFFEDEFF2), color: const Color(0xFF19B36B)),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Stack(
             children: [
-              Text('已用 ${formatDuration(elapsedSec)}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
-              Text('剩余 ${formatDuration(remainSec)}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: state.jobPaused
-                    ? FilledButton.icon(onPressed: actions.resumeJob, icon: const Icon(Icons.play_arrow), label: const Text('继续'))
-                    : OutlinedButton.icon(onPressed: actions.pauseJob, icon: const Icon(Icons.pause), label: const Text('暂停')),
+              const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.videocam_outlined, size: 48, color: Color(0xFF00AE42)),
+                    SizedBox(height: 8),
+                    Text('1080P 侧斜视实时画面监控', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  ],
+                ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: actions.abortJob,
-                  icon: const Icon(Icons.stop),
-                  label: const Text('停止'),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+              Positioned(
+                top: 12, left: 12,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: const Color(0xFF00AE42), borderRadius: BorderRadius.circular(6)),
+                  child: const Text('● LIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
+        ),
+        const SizedBox(height: 16),
 
-  Widget _quickActions() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        sectionTitle('快捷操作'),
-        const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 4,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 0.92,
+        // 雕刻进度卡片 (仅雕刻中出现)
+        if (isExecuting) ...[
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E222D),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFFF6700)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text('正在雕刻: $jobTitle', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
+                    ),
+                    Text('${(progress * 100).toInt()}%', style: const TextStyle(color: Color(0xFFFF6700), fontWeight: FontWeight.bold, fontSize: 20)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(value: progress, backgroundColor: Colors.white12, color: const Color(0xFFFF6700), minHeight: 8),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: onPauseToggle,
+                        icon: Icon(isPaused ? Icons.play_arrow : Icons.pause, size: 18),
+                        label: Text(isPaused ? '继续雕刻' : '暂停加工'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isPaused ? const Color(0xFF00AE42) : Colors.orange.shade800,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: onStopJob,
+                        icon: const Icon(Icons.stop, color: Colors.redAccent, size: 18),
+                        label: const Text('终止任务', style: TextStyle(color: Colors.redAccent)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Colors.redAccent),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // 辅助设备快捷开关
+        const Text('设备辅助设施', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        Row(
           children: [
-            _qaTile(Icons.lightbulb, state.lightOn ? '舱灯 开' : '舱灯 关', state.lightOn ? Colors.amber : Colors.grey, actions.toggleLight),
-            _qaTile(Icons.home, '回零', const Color(0xFF19B36B), () => actions.addLog('执行回零（回到机械原点）')),
-            _qaTile(Icons.gps_fixed, '自动对刀', const Color(0xFF3B82F6), () => actions.addLog('开始 Z 轴自动对刀')),
-            _qaTile(Icons.center_focus_weak, '红光定位', const Color(0xFF8B5CF6), () => actions.addLog('开启红光轮廓定位')),
+            _quickSwitchTile('照明灯', Icons.lightbulb_outline, isLightOn, onToggleLight),
+            const SizedBox(width: 12),
+            _quickSwitchTile('切削吹气', Icons.air, isAirOn, onToggleAir),
+            const SizedBox(width: 12),
+            _quickSwitchTile('吸尘收集', Icons.cleaning_services_outlined, isDustOn, onToggleDust),
           ],
         ),
       ],
     );
   }
 
-  Widget _qaTile(IconData icon, String label, Color color, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: const [BoxShadow(color: Color(0x0D000000), blurRadius: 8, offset: Offset(0, 2))]),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 6),
-            Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _startWorkCard() {
-    return InkWell(
-      onTap: () => onNavigate(2),
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF19B36B), Color(0xFF138A57)]), borderRadius: BorderRadius.all(Radius.circular(16))),
-        child: const Row(
-          children: [
-            Icon(Icons.add_circle_outline, color: Colors.white),
-            SizedBox(width: 10),
-            Expanded(child: Text('选择作品开始加工', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
-            Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _activityCard() {
-    final logs = state.activityLog.take(6).toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        sectionTitle('设备动态'),
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: cardDecoration(),
-          child: ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: logs.length,
-            separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFEEF0F2)),
-            itemBuilder: (_, i) => Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(logs[i], style: const TextStyle(fontSize: 12, color: Colors.black87))),
+  Widget _quickSwitchTile(String title, IconData icon, bool isOn, VoidCallback onToggle) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onToggle,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          decoration: BoxDecoration(
+            color: isOn ? const Color(0xFFFF6700).withOpacity(0.15) : const Color(0xFF1A1D26),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: isOn ? const Color(0xFFFF6700) : Colors.white10),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: isOn ? const Color(0xFFFF6700) : Colors.white38, size: 24),
+              const SizedBox(height: 8),
+              Text(title, style: TextStyle(color: isOn ? Colors.white : Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+              Text(isOn ? '开启' : '关闭', style: TextStyle(color: isOn ? const Color(0xFFFF6700) : Colors.white30, fontSize: 10)),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
 
-// ----------------------------- 控制台 -----------------------------
-class ControlScreen extends StatefulWidget {
-  final MachineState state;
-  final MachineActions actions;
-  const ControlScreen({Key? key, required this.state, required this.actions}) : super(key: key);
+// -----------------------------------------------------------------------------
+// 2. 轴控与对原点 (设置工件原点 Set WCS Zero)
+// -----------------------------------------------------------------------------
+class MotionControlView extends StatefulWidget {
+  final double x, y, z;
+  final bool isLanMode;
+  final int currentTool;
+  final VoidCallback onSetZeroX, onSetZeroY, onSetZeroZ, onSetAllZero;
+  final Function(double, double, double) onUpdateCoords;
+  final Function(int) onSelectTool;
+
+  const MotionControlView({
+    Key? key,
+    required this.x, required this.y, required this.z,
+    required this.isLanMode, required this.currentTool,
+    required this.onSetZeroX, required this.onSetZeroY, required this.onSetZeroZ, required this.onSetAllZero,
+    required this.onUpdateCoords, required this.onSelectTool,
+  }) : super(key: key);
+
   @override
-  State<ControlScreen> createState() => _ControlScreenState();
+  State<MotionControlView> createState() => _MotionControlViewState();
 }
 
-class _ControlScreenState extends State<ControlScreen> {
+class _MotionControlViewState extends State<MotionControlView> {
   double _step = 1.0;
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.state;
-    final a = widget.actions;
-    return SingleChildScrollView(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _axisCard(s, a),
-          const SizedBox(height: 16),
-          _jogCard(a),
-          const SizedBox(height: 16),
-          _commonOps(a),
-          const SizedBox(height: 16),
-          _toolCard(s, a),
-          const SizedBox(height: 16),
-          _auxCard(s, a),
-          const SizedBox(height: 16),
-          _overrideCard(s, a),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-
-  Widget _axisCard(MachineState s, MachineActions a) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: cardDecoration(),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // DRO 大字号数显与原点设定按钮
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: const Color(0xFF1A1D26), borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('当前坐标', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              TextButton(
-                onPressed: () {
-                  a.jog(-s.x, -s.y, -s.z);
-                  a.addLog('已设置工作原点 (X/Y/Z = 0)');
-                },
-                child: const Text('设为原点', style: TextStyle(color: Color(0xFF19B36B))),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _axisItem('X', s.x, const Color(0xFFE5484D)),
-              _axisItem('Y', s.y, const Color(0xFF19B36B)),
-              _axisItem('Z', s.z, const Color(0xFF3B82F6)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _axisItem(String axis, double val, Color color) {
-    return Expanded(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(color: const Color(0xFFF4F6F8), borderRadius: BorderRadius.circular(10)),
-        child: Column(
-          children: [
-            Text(axis, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(val.toStringAsFixed(3), style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace')),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _jogCard(MachineActions a) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: cardDecoration(),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('手动移动', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               Row(
-                children: [0.1, 1.0, 10.0].map((st) {
-                  final sel = _step == st;
-                  return GestureDetector(
-                    onTap: () => setState(() => _step = st),
-                    child: Container(
-                      margin: const EdgeInsets.only(left: 6),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(color: sel ? const Color(0xFF19B36B) : const Color(0xFFF4F6F8), borderRadius: BorderRadius.circular(8)),
-                      child: Text('${st}mm', style: TextStyle(color: sel ? Colors.white : Colors.black54, fontWeight: FontWeight.w600, fontSize: 12)),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _jogBtn('X-', () => a.jog(-_step, 0, 0)),
-              const SizedBox(width: 14),
-              Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _jogBtn('Y+', () => a.jog(0, _step, 0)),
-                  const SizedBox(height: 14),
-                  _jogBtn('Y-', () => a.jog(0, -_step, 0)),
+                  const Text('工件坐标系 (WCS G54)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+                  ElevatedButton.icon(
+                    onPressed: widget.onSetAllZero,
+                    icon: const Icon(Icons.my_location, size: 14),
+                    label: const Text('XYZ 设为当前原点', style: TextStyle(fontSize: 11)),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6700)),
+                  ),
                 ],
               ),
-              const SizedBox(width: 14),
-              _jogBtn('X+', () => a.jog(_step, 0, 0)),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _jogBtn('Z+', () => a.jog(0, 0, _step)),
-              const SizedBox(width: 14),
-              _jogBtn('Z-', () => a.jog(0, 0, -_step)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _jogBtn(String label, VoidCallback onTap) {
-    return SizedBox(
-      width: 64,
-      height: 48,
-      child: ElevatedButton(
-        onPressed: onTap,
-        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF4F6F8), foregroundColor: Colors.black87, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-        child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
-      ),
-    );
-  }
-
-  Widget _commonOps(MachineActions a) {
-    final ops = [
-      {'icon': Icons.gps_fixed, 'label': '自动对刀', 'color': const Color(0xFF3B82F6), 'msg': '开始 Z 轴自动对刀'},
-      {'icon': Icons.home, 'label': '回零', 'color': const Color(0xFF19B36B), 'msg': '执行回零（回到机械原点）'},
-      {'icon': Icons.center_focus_weak, 'label': '红光定位', 'color': const Color(0xFF8B5CF6), 'msg': '开启红光轮廓定位'},
-      {'icon': Icons.flaky, 'label': '台面找平', 'color': const Color(0xFFF2A33C), 'msg': '开始工作台自动找平'},
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        sectionTitle('常用操作'),
-        const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 2.6,
-          children: ops.map((o) {
-            return InkWell(
-              onTap: () => a.addLog(o['msg'] as String),
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: const [BoxShadow(color: Color(0x0D000000), blurRadius: 8, offset: Offset(0, 2))]),
-                child: Row(
-                  children: [
-                    Icon(o['icon'] as IconData, color: o['color'] as Color, size: 20),
-                    const SizedBox(width: 10),
-                    Text(o['label'] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  ],
-                ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _axisGaugeWithZero('X 轴', widget.x, Colors.redAccent, widget.onSetZeroX),
+                  _axisGaugeWithZero('Y 轴', widget.y, Colors.greenAccent, widget.onSetZeroY),
+                  _axisGaugeWithZero('Z 轴', widget.z, Colors.blueAccent, widget.onSetZeroZ),
+                ],
               ),
-            );
-          }).toList(),
+            ],
+          ),
         ),
-      ],
-    );
-  }
+        const SizedBox(height: 16),
 
-  Widget _toolCard(MachineState s, MachineActions a) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('刀具', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-          const SizedBox(height: 10),
-          Row(
-            children: kTools.map((t) {
-              final slot = int.parse(t['slot']!);
-              final active = s.tool == slot;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => a.selectTool(slot),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: active ? const Color(0xFF19B36B).withOpacity(0.12) : const Color(0xFFF4F6F8),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: active ? const Color(0xFF19B36B) : Colors.transparent),
-                    ),
-                    child: Column(
+        // Jog 点动控制器
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: const Color(0xFF1A1D26), borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('手动 Jog 点动对机', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+                  Row(
+                    children: [0.1, 1.0, 10.0].map((s) {
+                      bool sel = _step == s;
+                      return GestureDetector(
+                        onTap: () => setState(() => _step = s),
+                        child: Container(
+                          margin: const EdgeInsets.only(left: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: sel ? const Color(0xFFFF6700) : Colors.white10,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text('${s}mm', style: TextStyle(color: sel ? Colors.black : Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  SizedBox(
+                    width: 140, height: 140,
+                    child: Stack(
+                      alignment: Alignment.center,
                       children: [
-                        Text('T$slot', style: TextStyle(color: active ? const Color(0xFF19B36B) : Colors.black87, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        Text(t['name']!, style: const TextStyle(fontSize: 10, color: Colors.black54), textAlign: TextAlign.center),
+                        Positioned(top: 0, child: _jogBtn('Y+', () => widget.onUpdateCoords(widget.x, widget.y + _step, widget.z))),
+                        Positioned(bottom: 0, child: _jogBtn('Y-', () => widget.onUpdateCoords(widget.x, widget.y - _step, widget.z))),
+                        Positioned(left: 0, child: _jogBtn('X-', () => widget.onUpdateCoords(widget.x - _step, widget.y, widget.z))),
+                        Positioned(right: 0, child: _jogBtn('X+', () => widget.onUpdateCoords(widget.x + _step, widget.y, widget.z))),
                       ],
                     ),
                   ),
-                ),
-              );
-            }).toList(),
+                  Column(
+                    children: [
+                      _jogBtn('Z+', () => widget.onUpdateCoords(widget.x, widget.y, widget.z + _step)),
+                      const SizedBox(height: 12),
+                      _jogBtn('Z-', () => widget.onUpdateCoords(widget.x, widget.y, widget.z - _step)),
+                    ],
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
-      ),
-    );
-  }
+        ),
+        const SizedBox(height: 16),
 
-  Widget _auxCard(MachineState s, MachineActions a) {
-    return Row(
-      children: [
-        Expanded(child: _auxTile(Icons.air, '切削吹气', s.airOn, () => a.toggleAir())),
-        const SizedBox(width: 12),
-        Expanded(child: _auxTile(Icons.cleaning_services, '吸尘', s.dustOn, () => a.toggleDust())),
+        // ATC 换刀测试
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: const Color(0xFF1A1D26), borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('ATC 刀仓工位选择', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _toolTile(1, '3.175 平刀'),
+                  _toolTile(2, '60°V型 刀'),
+                  _toolTile(3, '2.0 球头刀'),
+                  _toolTile(4, '自动对刀块'),
+                ],
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
 
-  Widget _auxTile(IconData icon, String label, bool on, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+  Widget _axisGaugeWithZero(String label, double value, Color color, VoidCallback onSetZero) {
+    return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: on ? const Color(0xFF19B36B).withOpacity(0.12) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: on ? const Color(0xFF19B36B) : const Color(0xFFEDEFF2)),
-        ),
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(10)),
         child: Column(
           children: [
-            Icon(icon, color: on ? const Color(0xFF19B36B) : Colors.black45),
+            Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 2),
+            Text(value.toStringAsFixed(3), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
             const SizedBox(height: 6),
-            Text('$label · ${on ? '开' : '关'}', style: TextStyle(color: on ? const Color(0xFF19B36B) : Colors.black54, fontSize: 12, fontWeight: FontWeight.w600)),
+            InkWell(
+              onTap: onSetZero,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: color.withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
+                child: Text('清零', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _overrideCard(MachineState s, MachineActions a) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('进给 / 主轴倍率', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-          const SizedBox(height: 8),
-          Row(
+  Widget _jogBtn(String label, VoidCallback onPressed) {
+    return ElevatedButton(
+      onPressed: widget.isLanMode ? onPressed : null,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF262B38),
+        minimumSize: const Size(44, 44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _toolTile(int slot, String name) {
+    bool isSelected = widget.currentTool == slot;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => widget.onSelectTool(slot),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFFFF6700).withOpacity(0.2) : Colors.black26,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: isSelected ? const Color(0xFFFF6700) : Colors.white10),
+          ),
+          child: Column(
             children: [
-              const Text('进给', style: TextStyle(color: Colors.black54, fontSize: 12)),
-              Expanded(child: Slider(value: s.feedOverride, min: 10, max: 200, divisions: 19, label: '${s.feedOverride.toInt()}%', onChanged: a.setFeed)),
-              Text('${s.feedOverride.toInt()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text('T$slot', style: TextStyle(color: isSelected ? const Color(0xFFFF6700) : Colors.white, fontWeight: FontWeight.bold)),
+              Text(name, style: const TextStyle(color: Colors.white38, fontSize: 9)),
             ],
           ),
-          Row(
-            children: [
-              const Text('主轴', style: TextStyle(color: Colors.black54, fontSize: 12)),
-              Expanded(child: Slider(value: s.spindleOverride, min: 50, max: 150, divisions: 10, label: '${s.spindleOverride.toInt()}%', onChanged: a.setSpindle)),
-              Text('${s.spindleOverride.toInt()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
-            ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 3. 创作模型库
+// -----------------------------------------------------------------------------
+class ModelHubView extends StatelessWidget {
+  final Function(String) onLaunchJobWizard;
+
+  const ModelHubView({Key? key, required this.onLaunchJobWizard}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text('官方精选雕刻工程库', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        _modelCard('木质榫卯手机支架', '120 × 80 × 12 mm', '4mm 椴木板', '约 15 分钟', () => onLaunchJobWizard('木质榫卯手机支架')),
+        _modelCard('复古雕花黄铜茶杯垫', '90 × 90 × 3 mm', '黄铜板/胡桃木', '约 25 分钟', () => onLaunchJobWizard('复古雕花黄铜茶杯垫')),
+        _modelCard('PCB 双面测试电路板', '80 × 50 × 1.6 mm', '单面覆铜板', '约 10 分钟', () => onLaunchJobWizard('PCB 双面测试电路板')),
+      ],
+    );
+  }
+
+  Widget _modelCard(String title, String size, String material, String time, VoidCallback onStartWizard) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: const Color(0xFF1A1D26), borderRadius: BorderRadius.circular(16)),
+      child: Row(
+        children: [
+          Container(
+            width: 50, height: 50,
+            decoration: BoxDecoration(color: const Color(0xFFFF6700).withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+            child: const Icon(Icons.precision_manufacturing, color: Color(0xFFFF6700)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 4),
+                Text('$size | $material', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                Text(time, style: const TextStyle(color: Color(0xFF00AE42), fontSize: 10, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: onStartWizard,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6700),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('准备雕刻', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1187,238 +793,212 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 }
 
-// ----------------------------- 作品库 -----------------------------
-class ProjectsScreen extends StatelessWidget {
-  final MachineState state;
-  final MachineActions actions;
-  final void Function(int) onNavigate;
-  const ProjectsScreen({Key? key, required this.state, required this.actions, required this.onNavigate}) : super(key: key);
+// -----------------------------------------------------------------------------
+// 4. 设备工具与服务 (台面扫平 / 配网OTA)
+// -----------------------------------------------------------------------------
+class DeviceServicesView extends StatelessWidget {
+  final VoidCallback onOpenPairing;
+
+  const DeviceServicesView({Key? key, required this.onOpenPairing}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final s = state;
-    return SingleChildScrollView(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('作品库', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          const Text('选择一件作品即可开始加工', style: TextStyle(color: Colors.black54, fontSize: 13)),
-          const SizedBox(height: 14),
-          if (s.jobRunning) _runningBanner(s),
-          ...kProjects.map((p) => _projectCard(p, s)).toList(),
-          const SizedBox(height: 8),
-        ],
-      ),
+      children: [
+        const Text('设备保养与高级功能', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        _serviceTile(Icons.cleaning_services, '台面平面铣平清理', '使用平刀一键扫平牺牲底板', () {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已发送台面扫平指令，主轴启动中...')));
+        }),
+        _serviceTile(Icons.home_work, '机器归零复位 ($H)', '让三轴快速回归机械原点', () {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('机器正在执行全轴归零工作...')));
+        }),
+        _serviceTile(Icons.bluetooth, '设备蓝牙配网与绑定', '重新绑定附近 SmartCNC 机器', onOpenPairing),
+        _serviceTile(Icons.system_update, '固件 OTA 升级', '当前版本: v2.4.0 (已是最新)', () {}),
+      ],
     );
   }
 
-  Widget _runningBanner(MachineState s) {
-    final remainSec = (s.jobDurationSec * (1 - s.jobProgress)).round();
+  Widget _serviceTile(IconData icon, String title, String desc, VoidCallback onTap) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: const Color(0xFF19B36B).withOpacity(0.1), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF19B36B).withOpacity(0.4))),
+      decoration: BoxDecoration(color: const Color(0xFF1A1D26), borderRadius: BorderRadius.circular(16)),
+      child: ListTile(
+        onTap: onTap,
+        leading: Icon(icon, color: const Color(0xFFFF6700)),
+        title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+        subtitle: Text(desc, style: const TextStyle(color: Colors.white38, fontSize: 10)),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.white38),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 雕刻前准备向导 Modal (整合：工件原点确认 ➔ 激光循边 ➔ 自动对刀)
+// -----------------------------------------------------------------------------
+class JobPreparationModal extends StatefulWidget {
+  final String jobTitle;
+  final double currentX, currentY;
+  final VoidCallback onConfirmStart;
+
+  const JobPreparationModal({
+    Key? key,
+    required this.jobTitle,
+    required this.currentX, required this.currentY,
+    required this.onConfirmStart,
+  }) : super(key: key);
+
+  @override
+  State<JobPreparationModal> createState() => _JobPreparationModalState();
+}
+
+class _JobPreparationModalState extends State<JobPreparationModal> {
+  bool _isFramingDone = false;
+  bool _isProbingDone = false;
+  bool _isProbingRunning = false;
+
+  @override
+  Widget build(BuildContext context) {
+    bool canStart = _isFramingDone && _isProbingDone;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.72,
+      padding: const EdgeInsets.all(20),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1A1D26),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.precision_manufacturing, color: Color(0xFF19B36B)),
-              const SizedBox(width: 8),
-              Expanded(child: Text('正在加工：${s.jobName}', style: const TextStyle(fontWeight: FontWeight.bold))),
-              Text('${(s.jobProgress * 100).toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF19B36B))),
-            ],
+          Text('雕刻前准备向导 - 《${widget.jobTitle}》', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+          const Divider(color: Colors.white10, height: 20),
+          Expanded(
+            child: ListView(
+              children: [
+                // Step 1: 原点确认
+                _stepBox(
+                  '1', '工件零点确认', '已锁定当前位置为加工原点 (X0, Y0)',
+                  const Icon(Icons.check_circle, color: Color(0xFF00AE42), size: 20),
+                ),
+                const SizedBox(height: 12),
+
+                // Step 2: 激光红光循边
+                _stepBox(
+                  '2', '运行激光红光框线循边', '预览加工区域，确认未碰撞或超界',
+                  ElevatedButton.icon(
+                    onPressed: () => setState(() => _isFramingDone = true),
+                    icon: Icon(_isFramingDone ? Icons.check : Icons.crop_free, size: 14),
+                    label: Text(_isFramingDone ? '预览完成' : '运行红光预览', style: const TextStyle(fontSize: 10)),
+                    style: ElevatedButton.styleFrom(backgroundColor: _isFramingDone ? const Color(0xFF00AE42) : const Color(0xFFFF6700)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Step 3: 一键自动下探对刀
+                _stepBox(
+                  '3', '自动精准下探对刀', '对刀快测定刀尖与板材表面 Z0 零点',
+                  ElevatedButton.icon(
+                    onPressed: _isProbingRunning ? null : () async {
+                      setState(() => _isProbingRunning = true);
+                      await Future.delayed(const Duration(seconds: 2)); // 模拟自动对刀过程
+                      setState(() {
+                        _isProbingRunning = false;
+                        _isProbingDone = true;
+                      });
+                    },
+                    icon: _isProbingRunning
+                        ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : Icon(_isProbingDone ? Icons.check : Icons.vertical_align_bottom, size: 14),
+                    label: Text(_isProbingRunning ? '对刀中...' : (_isProbingDone ? '对刀成功' : '一键自动对刀'), style: const TextStyle(fontSize: 10)),
+                    style: ElevatedButton.styleFrom(backgroundColor: _isProbingDone ? const Color(0xFF00AE42) : Colors.blueAccent),
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(value: s.jobProgress, backgroundColor: const Color(0xFFEDEFF2), color: const Color(0xFF19B36B)),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('剩余 ${formatDuration(remainSec)}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
-              TextButton(onPressed: actions.abortJob, child: const Text('停止', style: TextStyle(color: Colors.red))),
-            ],
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: canStart ? widget.onConfirmStart : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF6700),
+                disabledBackgroundColor: Colors.white12,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(
+                canStart ? '全部校验就绪，解锁开始雕刻 ➔' : '请先完成 Step 2 循边预览与 Step 3 自动对刀',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: canStart ? Colors.white : Colors.white38),
+              ),
+            ),
           ),
-          const SizedBox(height: 4),
-          const Text('加工中，下方作品暂不可开始', style: TextStyle(color: Colors.black45, fontSize: 11)),
         ],
       ),
     );
   }
 
-  Widget _projectCard(Map<String, String> p, MachineState s) {
-    final running = s.jobRunning;
+  Widget _stepBox(String stepNum, String title, String subtitle, Widget trailing) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: cardDecoration(),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(color: const Color(0xFF19B36B).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-            child: const Icon(Icons.square_outlined, color: Color(0xFF19B36B)),
-          ),
+          CircleAvatar(radius: 12, backgroundColor: const Color(0xFFFF6700), child: Text(stepNum, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(p['name']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const SizedBox(height: 2),
-                Text('尺寸 ${p['size']} · ${p['tools']}', style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                Text(title, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                Text(subtitle, style: const TextStyle(color: Colors.white38, fontSize: 10)),
               ],
             ),
           ),
-          FilledButton(
-            onPressed: running ? null : () => actions.startJob(p['name']!, int.parse(p['duration']!)),
-            child: Text(running ? '加工中' : '开始加工'),
-          ),
+          trailing,
         ],
       ),
     );
   }
 }
 
-// ----------------------------- 我的 -----------------------------
-class MoreScreen extends StatelessWidget {
-  final MachineState state;
-  final MachineActions actions;
-  const MoreScreen({Key? key, required this.state, required this.actions}) : super(key: key);
+// -----------------------------------------------------------------------------
+// 配网 Modal
+// -----------------------------------------------------------------------------
+class DevicePairingModal extends StatelessWidget {
+  const DevicePairingModal({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.45,
+      padding: const EdgeInsets.all(20),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1A1D26),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _profile(),
-          const SizedBox(height: 16),
-          if (state.status == 'ALARM') _alarmBanner(),
-          _connectionCard(),
-          const SizedBox(height: 12),
-          _settingsCard(),
-          const SizedBox(height: 12),
-          _advancedCard(),
-          const SizedBox(height: 20),
-          const Center(child: Text('Smart CNC 3020 · v1.0.0', style: TextStyle(color: Colors.black38, fontSize: 11))),
-        ],
-      ),
-    );
-  }
-
-  Widget _profile() {
-    return Row(
-      children: [
-        Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(color: const Color(0xFF19B36B).withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
-          child: const Icon(Icons.precision_manufacturing, color: Color(0xFF19B36B), size: 28),
-        ),
-        const SizedBox(width: 14),
-        const Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('我的 CNC', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              Text('包覆款桌面 CNC · 智能控制', style: TextStyle(color: Colors.black54, fontSize: 12)),
-            ],
+          const Text('SmartCNC 设备蓝牙配网', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+          const Divider(color: Colors.white10, height: 20),
+          const ListTile(
+            leading: Icon(Icons.bluetooth, color: Color(0xFFFF6700)),
+            title: Text('SmartCNC-3020-A88F', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+            subtitle: Text('BLE 连接成功 | WebSocket 局域网直连 (1ms)', style: TextStyle(color: Colors.white38, fontSize: 10)),
+            trailing: Icon(Icons.check_circle, color: Color(0xFF00AE42)),
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _alarmBanner() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.red.shade200)),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber, color: Colors.red),
-          const SizedBox(width: 10),
-          const Expanded(child: Text('机器处于报警状态', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600))),
-          TextButton(onPressed: actions.clearAlarm, child: const Text('解除报警')),
-        ],
-      ),
-    );
-  }
-
-  Widget _connectionCard() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: cardDecoration(),
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: const Icon(Icons.wifi, color: Color(0xFF19B36B)),
-        title: const Text('设备连接', style: TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(state.isLanMode ? '局域网已连接 · 低延迟' : '远程连接 · 45ms', style: const TextStyle(color: Colors.black54, fontSize: 12)),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.black38),
-        onTap: actions.requestPairing,
-      ),
-    );
-  }
-
-  Widget _settingsCard() {
-    final items = [
-      {'icon': Icons.notifications_outlined, 'label': '通知设置'},
-      {'icon': Icons.info_outline, 'label': '关于本机'},
-      {'icon': Icons.help_outline, 'label': '帮助中心'},
-    ];
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      decoration: cardDecoration(),
-      child: Column(
-        children: items.map((it) {
-          return ListTile(
-            leading: Icon(it['icon'] as IconData, color: Colors.black54),
-            title: Text(it['label'] as String, style: const TextStyle(fontWeight: FontWeight.w500)),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.black38),
-            onTap: () {},
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _advancedCard() {
-    return Container(
-      decoration: cardDecoration(),
-      child: ExpansionTile(
-        leading: const Icon(Icons.terminal, color: Colors.black54),
-        title: const Text('开发者选项 · 调试终端', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-        subtitle: const Text('高级用户查看原始指令', style: TextStyle(fontSize: 11, color: Colors.black45)),
-        childrenPadding: const EdgeInsets.all(14),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: const Color(0xFF1A1D1F), borderRadius: BorderRadius.circular(10)),
-            child: const Text('\$100=250.000\n\$101=250.000\n\$102=400.000\nok', style: TextStyle(color: Color(0xFF19B36B), fontSize: 11, fontFamily: 'monospace')),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  style: const TextStyle(fontSize: 12),
-                  decoration: const InputDecoration(
-                    hintText: '输入 G 代码或 \$ 命令…',
-                    filled: true,
-                    fillColor: Color(0xFFF4F6F8),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.all(Radius.circular(10))),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(onPressed: () {}, child: const Text('发送')),
-            ],
+          const Spacer(),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6700), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+              child: const Text('返回终端', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
           ),
         ],
       ),
