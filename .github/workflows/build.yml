@@ -1,0 +1,38 @@
+name: Auto Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.6'
+          channel: 'stable'
+
+      - name: Build APK via Flutter
+        run: |
+          flutter create --org com.smartcnc my_cnc_app
+          cp main.dart my_cnc_app/lib/main.dart
+          cd my_cnc_app
+          flutter build apk --debug --no-tree-shake-icons
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartCNC-Android-App
+          path: my_cnc_app/build/app/outputs/flutter-apk/app-debug.apk
