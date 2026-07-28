@@ -113,7 +113,7 @@ class Telemetry {
       );
   static List<double> _toDoubles(dynamic v) {
     if (v is List) {
-      return v.map((e) => (e ?? 0).toDouble()).toList();
+      return v.map<double>((e) => (e ?? 0).toDouble()).toList();
     }
     return const [0, 0, 0];
   }
