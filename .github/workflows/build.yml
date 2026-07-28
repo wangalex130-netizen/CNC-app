@@ -24,6 +24,12 @@ jobs:
           flutter-version: '3.19.6'
           channel: 'stable'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Platform 34
+        run: sdkmanager "platforms;android-34"
+
       - name: Build APK via Flutter
         run: |
           flutter create --org com.smartcnc my_cnc_app
