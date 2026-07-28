@@ -1887,8 +1887,8 @@ class _Model3DPainter extends CustomPainter {
       target.y + dist * cos(el) * cos(az),
       target.z + dist * sin(el),
     );
-    final look = vm.Matrix4.lookAt(eye, target, vm.Vector3(0, 0, 1));
-    final persp = vm.Matrix4.perspective(0.7853, w / h, 1.0, dist * 6 + 1000);
+    final look = vm.lookAt(eye, target, vm.Vector3(0, 0, 1));
+    final persp = vm.perspective(0.7853, w / h, 1.0, dist * 6 + 1000);
     final vp = persp * look;
 
     // 平台网格
