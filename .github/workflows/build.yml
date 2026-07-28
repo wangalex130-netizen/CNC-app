@@ -24,16 +24,11 @@ jobs:
           flutter-version: '3.19.6'
           channel: 'stable'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK Platform 34
-        run: sdkmanager "platforms;android-34"
-
       - name: Build APK via Flutter
         run: |
           flutter create --org com.smartcnc my_cnc_app
           cp main.dart my_cnc_app/lib/main.dart
+
           # 复制自定义 pubspec.yaml（含 http 依赖）
           if [ -f pubspec.yaml ]; then
             cp pubspec.yaml my_cnc_app/pubspec.yaml
@@ -42,6 +37,14 @@ jobs:
           else
             cd my_cnc_app
           fi
+
+          # ★ 关键修复：Flutter 3.19.6 默认要求 SDK 34，但 runner 只有 33
+          #   直接把 build.gradle 的 compileSdk/targetSdk 改为 33（runner 自带）
+          sed -i 's/compileSdkVersion .*/compileSdkVersion 33/' \
+            android/app/build.gradle
+          sed -i 's/targetSdkVersion .*/targetSdkVersion 33/' \
+            android/app/build.gradle
+
           # 开启安卓明文流量（手机通过 http:// 局域网连电脑必需）
           sed -i 's|android:usesCleartextTraffic="false"|android:usesCleartextTraffic="true"|g' \
             android/app/src/main/AndroidManifest.xml
@@ -52,6 +55,7 @@ jobs:
           grep -q 'INTERNET' android/app/src/main/AndroidManifest.xml || \
             sed -i 's|</manifest>|<uses-permission android:name="android.permission.INTERNET"/></manifest>|' \
               android/app/src/main/AndroidManifest.xml
+
           flutter build apk --debug --no-tree-shake-icons
 
       - name: Upload APK Artifact
