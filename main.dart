@@ -1823,7 +1823,7 @@ class _Model3DScreenState extends State<Model3DScreen> {
               child: Container(
                 color: const Color(0xFF0E1116),
                 child: GestureDetector(
-                  onScaleStart: (d) => _lastScale = d.scale,
+                  onScaleStart: (_) => _lastScale = 1.0,
                   onScaleUpdate: (d) {
                     setState(() {
                       _az -= d.focalPointDelta.dx * 0.01;
