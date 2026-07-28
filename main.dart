@@ -135,7 +135,25 @@ class AppState extends ChangeNotifier {
 
   String get base => 'http://$ip:$port';
 
-  Future<void> connect() async {
+  Future<bool> connect() async {
+    lastError = '';
+    try {
+      final r = await http
+          .get(Uri.parse('$base/info'))
+          .timeout(const Duration(seconds: 3));
+      if (r.statusCode != 200) {
+        lastError = '电脑端软件返回异常（HTTP ${r.statusCode}）';
+        connected = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      lastError =
+          '无法连接 $base\n请检查：① IP/端口是否正确（端口默认 5000）② 手机与电脑是否同一 Wi-Fi ③ 电脑防火墙是否放行 5000 端口\n$e';
+      connected = false;
+      notifyListeners();
+      return false;
+    }
     connected = true;
     videoUrl = '$base/snapshot';
     notifyListeners();
@@ -143,11 +161,14 @@ class AppState extends ChangeNotifier {
     _poll = Timer.periodic(const Duration(milliseconds: 300), (_) => _pollState());
     await refreshModels();
     await _pollState();
+    return true;
   }
 
   void disconnect() {
     _poll?.cancel();
     connected = false;
+    models = [];
+    lastError = '';
     notifyListeners();
   }
 
@@ -174,11 +195,14 @@ class AppState extends ChangeNotifier {
       if (r.statusCode == 200) {
         final list = jsonDecode(r.body) as List;
         models = list.map((e) => ModelItem.fromJson(e)).toList();
-        notifyListeners();
+        lastError = '';
+      } else {
+        lastError = '模型库接口返回 HTTP ${r.statusCode}';
       }
     } catch (e) {
-      // 忽略：未连接时列表为空
+      lastError = '加载模型库失败：$e';
     }
+    notifyListeners();
   }
 
   Future<bool> sendCmd(String cmd,
@@ -758,15 +782,27 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> with SingleTickerProviderStateMixin {
   late TabController _tc;
+  bool _wasConnected = false;
+
   @override
   void initState() {
     super.initState();
     _tc = TabController(length: 2, vsync: this);
+    appState.addListener(_onAppState);
     if (appState.connected) appState.refreshModels();
+  }
+
+  void _onAppState() {
+    // 连接一旦建立，自动拉一次模型库（覆盖“先连后看”的场景）
+    if (appState.connected && !_wasConnected) {
+      appState.refreshModels();
+    }
+    _wasConnected = appState.connected;
   }
 
   @override
   void dispose() {
+    appState.removeListener(_onAppState);
     _tc.dispose();
     super.dispose();
   }
@@ -775,6 +811,30 @@ class _LibraryScreenState extends State<LibraryScreen> with SingleTickerProvider
   Widget build(BuildContext c) {
     if (!appState.connected) {
       return const Center(child: Text('请先在“我的”中连接电脑端软件', style: TextStyle(color: Colors.grey)));
+    }
+    if (appState.models.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('模型库暂时为空', style: TextStyle(color: Colors.grey)),
+              const SizedBox(height: 8),
+              if (appState.lastError.isNotEmpty)
+                Text(appState.lastError,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                    textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('重新加载'),
+                onPressed: () => appState.refreshModels(),
+              ),
+            ],
+          ),
+        ),
+      );
     }
     final public = appState.models.where((m) => m.public).toList();
     final mine = appState.models.where((m) => !m.public).toList();
@@ -1294,10 +1354,15 @@ class _MoreScreenState extends State<MoreScreen> {
                       icon: const Icon(Icons.link),
                       label: Text(appState.connected ? '重新连接' : '连接'),
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF19B36B), foregroundColor: Colors.white),
-                      onPressed: () {
+                      onPressed: () async {
                         appState.ip = _ip.text.trim();
                         appState.port = int.tryParse(_port.text.trim()) ?? 5000;
-                        appState.connect();
+                        final ok = await appState.connect();
+                        if (!ok && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('连接失败：${appState.lastError}')),
+                          );
+                        }
                         setState(() {});
                       },
                     ),
