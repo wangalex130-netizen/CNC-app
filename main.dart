@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 // ════════════════════════════════════════════════════════════════
 //  数据模型
@@ -201,17 +200,13 @@ class _MainScaffoldState extends State<MainScaffold> {
   }
 
   Future<void> _loadSaved() async {
-    final p = await SharedPreferences.getInstance();
-    final ip = p.getString('cnc_ip');
-    final pt = p.getString('cnc_port');
-    if (ip != null) _ipCtl.text = ip;
-    if (pt != null) _portCtl.text = pt;
+    // 首版暂用内存默认值，后续可接 shared_preferences 或其他持久化
+    _ipCtl.text = '192.168.1.100';
+    _portCtl.text = '23';
   }
 
   Future<void> _saveConn() async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString('cnc_ip', _ipCtl.text.trim());
-    await p.setString('cnc_port', _portCtl.text.trim());
+    // 无操作：IP/端口保存在内存中
   }
 
   // ── 收到机器一行数据 ──
