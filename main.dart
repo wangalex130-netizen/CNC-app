@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:vector_math/vector_math.dart' as vm;
 
 // ─────────────────────────────────────────────────────────────
 //   Smart CNC · 手机端 App（仅控制 + 监控）
@@ -34,6 +35,11 @@ class ModelItem {
   final String size;
   final String tool;
   final int lines;
+  final List<List<double>> outline; // 2D 轮廓（mm，居中于原点），用于 3D 拉伸
+  final double height;              // 材料厚度 / 雕刻高度（mm）
+  final Map<String, double> minMaterial; // 最小耗材尺寸 {w,d,h} mm
+  final List<String> materials;      // 后台设定的建议材料
+  final String toolId;              // 建议刀具（对应刀仓 T1..T4）
   const ModelItem({
     required this.name,
     required this.title,
@@ -42,15 +48,72 @@ class ModelItem {
     required this.size,
     required this.tool,
     required this.lines,
+    this.outline = const [],
+    this.height = 0,
+    this.minMaterial = const {},
+    this.materials = const [],
+    this.toolId = '',
   });
-  factory ModelItem.fromJson(Map<String, dynamic> j) => ModelItem(
+  factory ModelItem.fromJson(Map<String, dynamic> j) {
+    final ol = <List<double>>[];
+    if (j['outline'] is List) {
+      for (final p in j['outline']) {
+        if (p is List && p.length >= 2) {
+          ol.add([(p[0] ?? 0).toDouble(), (p[1] ?? 0).toDouble()]);
+        }
+      }
+    }
+    final mm = <String, double>{};
+    if (j['min_material'] is Map) {
+      final m = j['min_material'] as Map;
+      mm['w'] = (m['w'] ?? 0).toDouble();
+      mm['d'] = (m['d'] ?? 0).toDouble();
+      mm['h'] = (m['h'] ?? 0).toDouble();
+    }
+    final mats = <String>[];
+    if (j['materials'] is List) {
+      for (final x in j['materials']) mats.add(x.toString());
+    }
+    return ModelItem(
+      name: j['name'] ?? '',
+      title: j['title'] ?? j['name'] ?? '',
+      public: j['public'] ?? true,
+      desc: j['desc'] ?? '',
+      size: j['size'] ?? '',
+      tool: j['tool'] ?? '',
+      lines: j['lines'] ?? 0,
+      outline: ol,
+      height: (j['height'] ?? 0).toDouble(),
+      minMaterial: mm,
+      materials: mats,
+      toolId: j['tool_id'] ?? '',
+    );
+  }
+}
+
+// ── 刀仓刀位 ─────────────────────────────────────────────────
+class ToolSlot {
+  final String id;
+  final String name;
+  final double diameter;
+  final String type;
+  final bool installed; // 人工是否装入
+  final bool sensor;    // 刀仓传感器是否检测到（与 installed 同步）
+  const ToolSlot({
+    required this.id,
+    required this.name,
+    required this.diameter,
+    required this.type,
+    required this.installed,
+    required this.sensor,
+  });
+  factory ToolSlot.fromJson(Map<String, dynamic> j) => ToolSlot(
+        id: j['id'] ?? '',
         name: j['name'] ?? '',
-        title: j['title'] ?? j['name'] ?? '',
-        public: j['public'] ?? true,
-        desc: j['desc'] ?? '',
-        size: j['size'] ?? '',
-        tool: j['tool'] ?? '',
-        lines: j['lines'] ?? 0,
+        diameter: (j['diameter'] ?? 0).toDouble(),
+        type: j['type'] ?? '',
+        installed: j['installed'] ?? false,
+        sensor: j['sensor'] ?? false,
       );
 }
 
@@ -70,9 +133,11 @@ class Telemetry {
   final bool laserOn;
   final bool leveling;
   final bool leveled;
+  final double levelProgress;
   final bool jobRunning;
   final double progress;
   final String jobName;
+  final List<ToolSlot> tools;
   const Telemetry({
     this.status = 'Idle',
     this.doorOpen = false,
@@ -88,29 +153,39 @@ class Telemetry {
     this.laserOn = false,
     this.leveling = false,
     this.leveled = false,
+    this.levelProgress = 0,
     this.jobRunning = false,
     this.progress = 0,
     this.jobName = '',
+    this.tools = const [],
   });
-  factory Telemetry.fromJson(Map<String, dynamic> j) => Telemetry(
-        status: j['status'] ?? 'Idle',
-        doorOpen: j['door_open'] ?? false,
-        alarmCode: j['alarm_code'] ?? '',
-        alarmMsg: j['alarm_msg'] ?? '',
-        mpos: _toDoubles(j['mpos']),
-        wpos: _toDoubles(j['wpos']),
-        originSet: j['origin_set'] ?? false,
-        feed: j['feed'] ?? 0,
-        spindle: j['spindle'] ?? 0,
-        spindleOn: j['spindle_on'] ?? false,
-        previewMode: j['preview_mode'] ?? false,
-        laserOn: j['laser_on'] ?? false,
-        leveling: j['leveling'] ?? false,
-        leveled: j['leveled'] ?? false,
-        jobRunning: j['job_running'] ?? false,
-        progress: (j['progress'] ?? 0).toDouble(),
-        jobName: j['job_name'] ?? '',
-      );
+  factory Telemetry.fromJson(Map<String, dynamic> j) {
+    final tl = <ToolSlot>[];
+    if (j['tools'] is List) {
+      for (final s in j['tools']) tl.add(ToolSlot.fromJson(s));
+    }
+    return Telemetry(
+      status: j['status'] ?? 'Idle',
+      doorOpen: j['door_open'] ?? false,
+      alarmCode: j['alarm_code'] ?? '',
+      alarmMsg: j['alarm_msg'] ?? '',
+      mpos: _toDoubles(j['mpos']),
+      wpos: _toDoubles(j['wpos']),
+      originSet: j['origin_set'] ?? false,
+      feed: j['feed'] ?? 0,
+      spindle: j['spindle'] ?? 0,
+      spindleOn: j['spindle_on'] ?? false,
+      previewMode: j['preview_mode'] ?? false,
+      laserOn: j['laser_on'] ?? false,
+      leveling: j['leveling'] ?? false,
+      leveled: j['leveled'] ?? false,
+      levelProgress: (j['level_progress'] ?? 0).toDouble(),
+      jobRunning: j['job_running'] ?? false,
+      progress: (j['progress'] ?? 0).toDouble(),
+      jobName: j['job_name'] ?? '',
+      tools: tl,
+    );
+  }
   static List<double> _toDoubles(dynamic v) {
     if (v is List) {
       return v.map<double>((e) => (e ?? 0).toDouble()).toList();
@@ -132,6 +207,13 @@ class AppState extends ChangeNotifier {
   bool autoLevel = false;
   String lastError = '';
   Timer? _poll;
+  // —— 机器型号 / 平台尺寸（决定 3D 标尺）——
+  String machineType = '3020';
+  String machineLabel = 'SmartCNC 3020';
+  double bedX = 300;
+  double bedY = 200;
+  // —— 虚拟刀仓（4 刀位）——
+  List<ToolSlot> tools = [];
 
   String get base => 'http://$ip:$port';
 
@@ -147,6 +229,18 @@ class AppState extends ChangeNotifier {
         notifyListeners();
         return false;
       }
+      try {
+        final info = jsonDecode(r.body);
+        if (info is Map && info['machine'] is Map) {
+          final m = info['machine'];
+          machineType = m['type'] ?? machineType;
+          machineLabel = m['label'] ?? machineLabel;
+          bedX = (m['bed_x'] ?? bedX).toDouble();
+          bedY = (m['bed_y'] ?? bedY).toDouble();
+        }
+      } catch (e) {
+        // 老版本模拟器无 machine 字段时忽略，使用默认 3020
+      }
     } catch (e) {
       lastError =
           '无法连接 $base\n请检查：① IP/端口是否正确（端口默认 5000）② 手机与电脑是否同一 Wi-Fi ③ 电脑防火墙是否放行 5000 端口\n$e';
@@ -160,6 +254,7 @@ class AppState extends ChangeNotifier {
     _poll?.cancel();
     _poll = Timer.periodic(const Duration(milliseconds: 300), (_) => _pollState());
     await refreshModels();
+    await fetchTools();
     await _pollState();
     return true;
   }
@@ -203,6 +298,23 @@ class AppState extends ChangeNotifier {
       lastError = '加载模型库失败：$e';
     }
     notifyListeners();
+  }
+
+  Future<void> fetchTools() async {
+    try {
+      final r = await http
+          .get(Uri.parse('$base/tools'))
+          .timeout(const Duration(seconds: 3));
+      if (r.statusCode == 200) {
+        final d = jsonDecode(r.body);
+        if (d['slots'] is List) {
+          tools = (d['slots'] as List).map((e) => ToolSlot.fromJson(e)).toList();
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      // 忽略
+    }
   }
 
   Future<bool> sendCmd(String cmd,
@@ -952,12 +1064,112 @@ class _PrepareScreenState extends State<PrepareScreen> {
   double _step = 1.0;
   bool _autoLevel = false;
   bool _busy = false;
+  String _material = '';
+  bool _showDims = false;
+  final _wC = TextEditingController();
+  final _dC = TextEditingController();
+  final _hC = TextEditingController();
+  bool _toolConfirmed = false;
 
   @override
   void initState() {
     super.initState();
     _autoLevel = appState.autoLevel;
+    _material = widget.model.materials.isNotEmpty ? widget.model.materials.first : '';
+    final mm = widget.model.minMaterial;
+    _wC.text = ((mm['w'] ?? 0)).toStringAsFixed(0);
+    _dC.text = ((mm['d'] ?? 0)).toStringAsFixed(0);
+    _hC.text = ((mm['h'] ?? 0)).toStringAsFixed(0);
     appState.selectModel(widget.model);
+    appState.fetchTools();
+  }
+
+  bool get _dimsOk {
+    if (!_showDims) return true;
+    final w = double.tryParse(_wC.text) ?? 0;
+    final d = double.tryParse(_dC.text) ?? 0;
+    final h = double.tryParse(_hC.text) ?? 0;
+    final mm = widget.model.minMaterial;
+    return w >= (mm['w'] ?? 0) - 0.01 &&
+        d >= (mm['d'] ?? 0) - 0.01 &&
+        h >= (mm['h'] ?? 0) - 0.01;
+  }
+
+  List<ToolSlot> get _slots =>
+      appState.tools.isNotEmpty ? appState.tools : appState.telem.tools;
+
+  ToolSlot? get _reqSlot {
+    if (widget.model.toolId.isEmpty) return null;
+    for (final s in _slots) {
+      if (s.id == widget.model.toolId) return s;
+    }
+    return null;
+  }
+
+  bool get _reqPresent {
+    final r = _reqSlot;
+    return r != null && r.installed && r.sensor;
+  }
+
+  @override
+  void dispose() {
+    _wC.dispose();
+    _dC.dispose();
+    _hC.dispose();
+    super.dispose();
+  }
+
+  Widget _numField(String label, TextEditingController c) => TextField(
+        controller: c,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+            labelText: label, border: const OutlineInputBorder(), isDense: true),
+      );
+
+  List<Widget> _toolSlotWidgets() {
+    final slots = _slots;
+    if (slots.isEmpty) {
+      return [const Text('正在读取刀仓…', style: TextStyle(color: Colors.grey))];
+    }
+    return slots.map((s) {
+      final required = s.id == widget.model.toolId;
+      final present = s.installed && s.sensor;
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: required
+              ? const Color(0xFF19B36B).withOpacity(0.08)
+              : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: required
+                  ? const Color(0xFF19B36B).withOpacity(0.4)
+                  : Colors.grey.shade300),
+        ),
+        child: Row(children: [
+          Icon(present ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: present ? const Color(0xFF19B36B) : Colors.grey),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${s.id}  ${s.name}${required ? "（建议刀具）" : ""}',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                Text(present ? '刀仓传感器：检测到有刀' : '刀仓传感器：空 / 未检测',
+                    style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              ],
+            ),
+          ),
+          if (required)
+            Checkbox(
+              value: _toolConfirmed,
+              onChanged: present ? (v) => setState(() => _toolConfirmed = v ?? false) : null,
+            ),
+        ]),
+      );
+    }).toList();
   }
 
   void _jog(String axis, double dir) {
@@ -1014,6 +1226,22 @@ class _PrepareScreenState extends State<PrepareScreen> {
                       if (widget.model.size.isNotEmpty) _Tag('尺寸 ${widget.model.size}'),
                       if (widget.model.tool.isNotEmpty) _Tag('刀具 ${widget.model.tool}'),
                     ]),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.view_in_ar),
+                        label: const Text('3D 预览（旋转 / 缩放查看模型与平台）'),
+                        onPressed: () => Navigator.of(c).push(MaterialPageRoute(
+                            builder: (_) => Model3DScreen(
+                                  title: widget.model.title,
+                                  bedX: appState.bedX,
+                                  bedY: appState.bedY,
+                                  outline: widget.model.outline,
+                                  height: widget.model.height,
+                                ))),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1033,9 +1261,15 @@ class _PrepareScreenState extends State<PrepareScreen> {
                         if (t.leveled) const StatusChip('已找平', Colors.purple),
                       ]),
                       const SizedBox(height: 10),
-                      LinearProgressIndicator(value: t.progress, minHeight: 10, color: statusColor(t.status)),
-                      const SizedBox(height: 6),
-                      Text('进度 ${(t.progress * 100).round()}%', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      if (t.leveling) ...[
+                        LinearProgressIndicator(value: t.levelProgress, minHeight: 10, color: statusColor('Level')),
+                        const SizedBox(height: 6),
+                        Text('找平进度 ${(t.levelProgress * 100).round()}%', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      ] else ...[
+                        LinearProgressIndicator(value: t.progress, minHeight: 10, color: statusColor(t.status)),
+                        const SizedBox(height: 6),
+                        Text('进度 ${(t.progress * 100).round()}%', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      ],
                       const SizedBox(height: 10),
                       Row(children: [
                         Expanded(child: OutlinedButton.icon(icon: const Icon(Icons.pause), label: const Text('暂停'), onPressed: t.status == 'Hold' ? null : () => appState.sendCmd('!'))),
@@ -1138,6 +1372,73 @@ class _PrepareScreenState extends State<PrepareScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              // —— 第 3 步：耗材与刀具确认 ——
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('③ 耗材与刀具确认', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                      const SizedBox(height: 4),
+                      const Text('选择你实际放入的耗材材质；默认无需填写尺寸（请放入≥最小要求的耗材，激光预览时确认实际雕刻区域）。若已知材料尺寸可填写以校验。', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                      const SizedBox(height: 10),
+                      const Text('实际耗材材质', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      Wrap(spacing: 8, runSpacing: 6, children: [
+                        ...widget.model.materials.map((m) => ChoiceChip(
+                              label: Text(m),
+                              selected: _material == m,
+                              onSelected: (_) => setState(() => _material = m),
+                            )),
+                        ChoiceChip(
+                          label: const Text('自定义'),
+                          selected: _material == '自定义',
+                          onSelected: (_) => setState(() => _material = '自定义'),
+                        ),
+                      ]),
+                      if (_material == '自定义')
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: TextField(
+                            onChanged: (v) => setState(() => _material = v),
+                            decoration: const InputDecoration(labelText: '自定义材料名称', border: OutlineInputBorder()),
+                          ),
+                        ),
+                      const SizedBox(height: 10),
+                      Row(children: [
+                        Checkbox(value: _showDims, onChanged: (v) => setState(() => _showDims = v ?? false)),
+                        const Expanded(child: Text('我已知实际耗材尺寸（用于校验是否≥最小要求）')),
+                      ]),
+                      if (_showDims) ...[
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          Expanded(child: _numField('宽 W (mm)', _wC)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _numField('深 D (mm)', _dC)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _numField('高 H (mm)', _hC)),
+                        ]),
+                        const SizedBox(height: 6),
+                        Text('最小要求：${(widget.model.minMaterial['w'] ?? 0).toStringAsFixed(0)}×${(widget.model.minMaterial['d'] ?? 0).toStringAsFixed(0)}×${(widget.model.minMaterial['h'] ?? 0).toStringAsFixed(0)} mm',
+                            style: TextStyle(color: _dimsOk ? const Color(0xFF19B36B) : Colors.red, fontWeight: FontWeight.w600)),
+                        if (!_dimsOk)
+                          const Text('⚠ 实际耗材小于最小要求，可能无法完整雕刻', style: TextStyle(color: Colors.red)),
+                        const SizedBox(height: 6),
+                        const Text('提示：激光预览时可在机器上确认实际雕刻区域是否落在耗材内。', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                      ],
+                      const SizedBox(height: 12),
+                      const Text('刀仓确认（类拓竹 AMS）', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      const Text('请按刀仓实际状态逐项确认：建议刀具所在的刀位必须已装入并被传感器检测到。', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      ..._toolSlotWidgets(),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
               // —— 第 4 步：确认雕刻 ——
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -1154,6 +1455,34 @@ class _PrepareScreenState extends State<PrepareScreen> {
                           decoration: BoxDecoration(color: const Color(0xFFFFF4E5), borderRadius: BorderRadius.circular(8)),
                           child: const Text('请先“确定原点”再开始雕刻。', style: TextStyle(color: Color(0xFFA35A00))),
                         ),
+                      if (_material.isEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(color: const Color(0xFFFFF4E5), borderRadius: BorderRadius.circular(8)),
+                          child: const Text('请选择实际耗材材质。', style: TextStyle(color: Color(0xFFA35A00))),
+                        ),
+                      if (!_reqPresent)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(color: const Color(0xFFFFF4E5), borderRadius: BorderRadius.circular(8)),
+                          child: Text('建议刀具 ${widget.model.toolId} 未装入刀仓（传感器未检测到）。请在机器上装入后再确认。', style: const TextStyle(color: Color(0xFFA35A00))),
+                        )
+                      else if (!_toolConfirmed)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(color: const Color(0xFFFFF4E5), borderRadius: BorderRadius.circular(8)),
+                          child: const Text('请勾选确认建议刀具所在的刀位已就位。', style: TextStyle(color: Color(0xFFA35A00))),
+                        ),
+                      if (_showDims && !_dimsOk)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(color: const Color(0xFFFDECEC), borderRadius: BorderRadius.circular(8)),
+                          child: const Text('实际耗材小于最小要求，请更换更大耗材或关闭“已知尺寸”。', style: TextStyle(color: Color(0xFFE23B3B))),
+                        ),
                       const SizedBox(height: 10),
                       SizedBox(
                         width: double.infinity,
@@ -1161,11 +1490,15 @@ class _PrepareScreenState extends State<PrepareScreen> {
                           icon: const Icon(Icons.play_circle_fill),
                           label: const Text('确认雕刻'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: t.originSet ? const Color(0xFF19B36B) : Colors.grey,
+                            backgroundColor: (t.originSet && _material.isNotEmpty && _reqPresent && _toolConfirmed && _dimsOk && !_busy)
+                                ? const Color(0xFF19B36B)
+                                : Colors.grey,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
-                          onPressed: (t.originSet && !_busy) ? _start : null,
+                          onPressed: (t.originSet && _material.isNotEmpty && _reqPresent && _toolConfirmed && _dimsOk && !_busy)
+                              ? _start
+                              : null,
                         ),
                       ),
                     ],
@@ -1441,6 +1774,257 @@ class _MoreScreenState extends State<MoreScreen> {
       ],
     );
   }
+}
+
+// ── 3D 模型预览（旋转 / 缩放 / 平台标尺）──────────────────────
+class Model3DScreen extends StatefulWidget {
+  final String title;
+  final double bedX;
+  final double bedY;
+  final List<List<double>> outline;
+  final double height;
+  const Model3DScreen(
+      {required this.title,
+      required this.bedX,
+      required this.bedY,
+      required this.outline,
+      required this.height,
+      super.key});
+  @override
+  State<Model3DScreen> createState() => _Model3DScreenState();
+}
+
+class _Model3DScreenState extends State<Model3DScreen> {
+  double _az = -0.7;
+  double _el = 0.5;
+  late double _dist;
+  double _lastScale = 1.0;
+  final double _minDist = 60.0;
+  final double _maxDist = 1400.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _dist = max(widget.bedX, widget.bedY) * 1.9;
+  }
+
+  void _reset() => setState(() {
+        _az = -0.7;
+        _el = 0.5;
+        _dist = max(widget.bedX, widget.bedY) * 1.9;
+      });
+
+  @override
+  Widget build(BuildContext c) => Scaffold(
+        appBar: AppBar(title: Text('3D 预览 · ${widget.title}')),
+        body: Column(
+          children: [
+            Expanded(
+              child: Container(
+                color: const Color(0xFF0E1116),
+                child: GestureDetector(
+                  onScaleStart: (d) => _lastScale = d.scale,
+                  onScaleUpdate: (d) {
+                    setState(() {
+                      _az -= d.focalPointDelta.dx * 0.01;
+                      _el = (_el - d.focalPointDelta.dy * 0.01).clamp(-1.35, 1.35);
+                      final f = d.scale / max(_lastScale, 1e-3);
+                      _dist = (_dist / f).clamp(_minDist, _maxDist);
+                      _lastScale = d.scale;
+                    });
+                  },
+                  child: CustomPaint(
+                    painter: _Model3DPainter(widget.bedX, widget.bedY,
+                        widget.outline, widget.height, _az, _el, _dist),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+              ),
+            ),
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('单指拖动旋转 · 双指捏合缩放',
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                  ),
+                  TextButton.icon(
+                      onPressed: _reset,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('复位')),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _Model3DPainter extends CustomPainter {
+  final double bedX, bedY;
+  final List<List<double>> outline;
+  final double height;
+  final double az, el, dist;
+  _Model3DPainter(this.bedX, this.bedY, this.outline, this.height, this.az,
+      this.el, this.dist);
+
+  vm.Vector3 _project(vm.Vector3 p, vm.Matrix4 vp, double w, double h) {
+    final clip = vp * vm.Vector4(p.x, p.y, p.z, 1.0);
+    if (clip.w <= 1e-6) return vm.Vector3(double.nan, double.nan, double.nan);
+    final ndcx = clip.x / clip.w;
+    final ndcy = clip.y / clip.w;
+    return vm.Vector3((ndcx * 0.5 + 0.5) * w, (1 - (ndcy * 0.5 + 0.5)) * h, clip.w);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final target = vm.Vector3(bedX / 2, bedY / 2, height * 0.5);
+    final eye = vm.Vector3(
+      target.x + dist * cos(el) * sin(az),
+      target.y + dist * cos(el) * cos(az),
+      target.z + dist * sin(el),
+    );
+    final look = vm.Matrix4.lookAt(eye, target, vm.Vector3(0, 0, 1));
+    final persp = vm.Matrix4.perspective(0.7853, w / h, 1.0, dist * 6 + 1000);
+    final vp = persp * look;
+
+    // 平台网格
+    final grid = Paint()..color = const Color(0x333A4554)..strokeWidth = 1;
+    const step = 20.0;
+    for (double x = 0; x <= bedX + 0.1; x += step) {
+      final a = _project(vm.Vector3(x, 0, 0), vp, w, h);
+      final b = _project(vm.Vector3(x, bedY, 0), vp, w, h);
+      if (a.z > 0 && b.z > 0) canvas.drawLine(Offset(a.x, a.y), Offset(b.x, b.y), grid);
+    }
+    for (double y = 0; y <= bedY + 0.1; y += step) {
+      final a = _project(vm.Vector3(0, y, 0), vp, w, h);
+      final b = _project(vm.Vector3(bedX, y, 0), vp, w, h);
+      if (a.z > 0 && b.z > 0) canvas.drawLine(Offset(a.x, a.y), Offset(b.x, b.y), grid);
+    }
+    // 平台边框
+    final borderPts = [
+      vm.Vector3(0, 0, 0),
+      vm.Vector3(bedX, 0, 0),
+      vm.Vector3(bedX, bedY, 0),
+      vm.Vector3(0, bedY, 0)
+    ];
+    _drawPoly(canvas, borderPts, vp, w, h,
+        Paint()..color = const Color(0xFF6FA8FF)..strokeWidth = 2);
+
+    // 标尺刻度（前边 y=0 与左边 x=0）
+    final tick = Paint()..color = const Color(0xFF8FB6FF)..strokeWidth = 1.5;
+    for (double x = 0; x <= bedX + 0.1; x += 10) {
+      final major = (x % 50).abs() < 0.1;
+      final a = _project(vm.Vector3(x, 0, 0), vp, w, h);
+      final b = _project(vm.Vector3(x, major ? 6 : 3, 0), vp, w, h);
+      if (a.z > 0 && b.z > 0) {
+        canvas.drawLine(Offset(a.x, a.y), Offset(b.x, b.y), tick);
+        if (major) _label(canvas, '${x.toInt()}', a.x, a.y + 10);
+      }
+    }
+    for (double y = 0; y <= bedY + 0.1; y += 10) {
+      final major = (y % 50).abs() < 0.1;
+      final a = _project(vm.Vector3(0, y, 0), vp, w, h);
+      final b = _project(vm.Vector3(major ? 6 : 3, y, 0), vp, w, h);
+      if (a.z > 0 && b.z > 0) {
+        canvas.drawLine(Offset(a.x, a.y), Offset(b.x, b.y), tick);
+        if (major) _label(canvas, '${y.toInt()}', a.x - 18, a.y + 4);
+      }
+    }
+
+    // 模型（拉伸轮廓到 height，置于平台中央）
+    if (outline.length >= 3) {
+      final cx = bedX / 2, cy = bedY / 2;
+      final bottom = outline.map((p) => vm.Vector3(cx + p[0], cy + p[1], 0)).toList();
+      final top = outline.map((p) => vm.Vector3(cx + p[0], cy + p[1], height)).toList();
+      _fillPoly(canvas, bottom, vp, w, h, const Color(0x5519B36B));
+      for (int i = 0; i < outline.length; i++) {
+        final j = (i + 1) % outline.length;
+        _fillQuad(canvas, bottom[i], bottom[j], top[j], top[i], vp, w, h,
+            const Color(0x3319B36B));
+      }
+      _fillPoly(canvas, top, vp, w, h, const Color(0x8819B36B));
+      final line = Paint()..color = const Color(0xFF19B36B)..strokeWidth = 2;
+      _drawPoly(canvas, bottom, vp, w, h, line);
+      _drawPoly(canvas, top, vp, w, h, line);
+      for (int i = 0; i < outline.length; i++) {
+        final b = _project(bottom[i], vp, w, h);
+        final t = _project(top[i], vp, w, h);
+        if (b.z > 0 && t.z > 0) canvas.drawLine(Offset(b.x, b.y), Offset(t.x, t.y), line);
+      }
+      double minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+      for (final p in outline) {
+        minX = min(minX, p[0]);
+        maxX = max(maxX, p[0]);
+        minY = min(minY, p[1]);
+        maxY = max(maxY, p[1]);
+      }
+      final Wd = (maxX - minX).abs(), Dd = (maxY - minY).abs();
+      final tp = _project(vm.Vector3(cx, cy, height + 4), vp, w, h);
+      if (tp.z > 0) {
+        _labelBig(canvas,
+            '模型 ${Wd.toStringAsFixed(0)}×${Dd.toStringAsFixed(0)}×${height.toStringAsFixed(0)} mm', tp.x, tp.y - 4);
+      }
+    }
+
+    final bp = _project(vm.Vector3(bedX / 2, bedY + 10, 0), vp, w, h);
+    if (bp.z > 0) {
+      _labelBig(canvas, '平台 ${bedX.toInt()}×${bedY.toInt()} mm', bp.x, bp.y);
+    }
+  }
+
+  void _label(Canvas c, String s, double x, double y) {
+    final tp = TextPainter(
+        text: TextSpan(
+            text: s, style: const TextStyle(color: Color(0xFF8FB6FF), fontSize: 10)),
+        textDirection: TextDirection.ltr);
+    tp.layout();
+    tp.paint(c, Offset(x - tp.width / 2, y));
+  }
+
+  void _labelBig(Canvas c, String s, double x, double y) {
+    final tp = TextPainter(
+        text: TextSpan(
+            text: s,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+        textDirection: TextDirection.ltr);
+    tp.layout();
+    tp.paint(c, Offset(x - tp.width / 2, y - tp.height));
+  }
+
+  void _drawPoly(Canvas c, List<vm.Vector3> pts, vm.Matrix4 vp, double w, double h, Paint p) {
+    if (pts.length < 2) return;
+    final proj = pts.map((v) => _project(v, vp, w, h)).toList();
+    if (proj.any((v) => v.z <= 0)) return;
+    final path = Path();
+    path.moveTo(proj[0].x, proj[0].y);
+    for (int i = 1; i < proj.length; i++) path.lineTo(proj[i].x, proj[i].y);
+    path.close();
+    c.drawPath(path, p);
+  }
+
+  void _fillPoly(Canvas c, List<vm.Vector3> pts, vm.Matrix4 vp, double w, double h, Color col) {
+    if (pts.length < 3) return;
+    final proj = pts.map((v) => _project(v, vp, w, h)).toList();
+    if (proj.any((v) => v.z <= 0)) return;
+    final path = Path();
+    path.moveTo(proj[0].x, proj[0].y);
+    for (int i = 1; i < proj.length; i++) path.lineTo(proj[i].x, proj[i].y);
+    path.close();
+    c.drawPath(path, Paint()..color = col..style = PaintingStyle.fill);
+  }
+
+  void _fillQuad(Canvas c, vm.Vector3 a, vm.Vector3 b, vm.Vector3 d2, vm.Vector3 e,
+      vm.Matrix4 vp, double w, double h, Color col) {
+    _fillPoly(c, [a, b, d2, e], vp, w, h, col);
+  }
+
+  @override
+  bool shouldRepaint(covariant _Model3DPainter o) => true;
 }
 
 // ── 连接弹窗 ─────────────────────────────────────────────────
