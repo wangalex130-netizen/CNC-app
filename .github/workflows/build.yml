@@ -28,7 +28,24 @@ jobs:
         run: |
           flutter create --org com.smartcnc my_cnc_app
           cp main.dart my_cnc_app/lib/main.dart
-          cd my_cnc_app
+          # 复制自定义 pubspec.yaml（含 http 依赖）
+          if [ -f pubspec.yaml ]; then
+            cp pubspec.yaml my_cnc_app/pubspec.yaml
+            cd my_cnc_app
+            flutter pub get
+          else
+            cd my_cnc_app
+          fi
+          # 开启安卓明文流量（手机通过 http:// 局域网连电脑必需）
+          sed -i 's|android:usesCleartextTraffic="false"|android:usesCleartextTraffic="true"|g' \
+            android/app/src/main/AndroidManifest.xml
+          grep -q 'usesCleartextTraffic' android/app/src/main/AndroidManifest.xml || \
+            sed -i 's|<application|<application android:usesCleartextTraffic="true"|' \
+              android/app/src/main/AndroidManifest.xml
+          # 确保有 INTERNET 权限
+          grep -q 'INTERNET' android/app/src/main/AndroidManifest.xml || \
+            sed -i 's|</manifest>|<uses-permission android:name="android.permission.INTERNET"/></manifest>|' \
+              android/app/src/main/AndroidManifest.xml
           flutter build apk --debug --no-tree-shake-icons
 
       - name: Upload APK Artifact
