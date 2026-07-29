@@ -196,7 +196,7 @@ class Telemetry {
 
 // ── 全局状态 ─────────────────────────────────────────────────
 class AppState extends ChangeNotifier {
-  String ip = '192.168.1.100';
+  String ip = '192.168.1.22';
   int port = 5000; // 电脑端软件 HTTP 端口
   String videoUrl = '';
   bool connected = false;
@@ -386,7 +386,7 @@ class SmartCncApp extends StatefulWidget {
 
 class _SmartCncAppState extends State<SmartCncApp> {
   int _tab = 0;
-  final _pages = const [HomeScreen(), LibraryScreen(), ControlScreen(), MoreScreen()];
+  final _pages = const [MonitorControlScreen(), LibraryScreen(), MoreScreen()];
 
   void goTo(int i) => setState(() => _tab = i);
 
@@ -431,9 +431,8 @@ class _SmartCncAppState extends State<SmartCncApp> {
             unselectedItemColor: Colors.grey,
             onTap: (i) => setState(() => _tab = i),
             items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.home), label: '首页'),
+              BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: '监控控制'),
               BottomNavigationBarItem(icon: Icon(Icons.library_books), label: '模型库'),
-              BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: '控制台'),
               BottomNavigationBarItem(icon: Icon(Icons.person), label: '我的'),
             ],
           ),
@@ -746,7 +745,267 @@ Widget buildBanners() {
   return const SizedBox.shrink();
 }
 
-// ── 首页 ─────────────────────────────────────────────────────
+// ── 监控与控制（合并界面）────────────────────────────────────
+class MonitorControlScreen extends StatefulWidget {
+  const MonitorControlScreen({super.key});
+  @override
+  State<MonitorControlScreen> createState() => _MonitorControlScreenState();
+}
+
+class _MonitorControlScreenState extends State<MonitorControlScreen> {
+  double _jogStep = 1.0;
+  void _jog(String axis, double dir) {
+    if (appState.telem.jobRunning || appState.telem.previewMode) return;
+    appState.sendCmd('\$J=$axis${(dir * _jogStep).toString()}');
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    final t = appState.telem;
+    if (!appState.connected) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.wifi_off, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text('尚未连接到电脑端软件', style: TextStyle(fontSize: 16, color: Colors.grey)),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.link),
+              label: const Text('去连接'),
+              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12)),
+              onPressed: () => showConnectSheet(c),
+            ),
+          ],
+        ),
+      );
+    }
+    final active = t.status == 'Run' || t.status == 'Level' || t.status == 'Preview';
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── 状态栏 ──
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(children: [
+                StatusChip(statusLabel(t.status), statusColor(t.status), icon: Icons.circle),
+                const Spacer(),
+                StatusChip('进给 ${t.feed}', Colors.blueGrey),
+                const SizedBox(width: 6),
+                StatusChip('主轴 ${t.spindle}', Colors.blueGrey),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // ── 实时画面 + 坐标（左右分栏）──
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 5,
+                child: Card(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('实时画面', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                        const SizedBox(height: 6),
+                        LiveView(url: appState.videoUrl, height: 160),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 4,
+                child: Card(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('坐标', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                        const SizedBox(height: 6),
+                        _CoordRow('工件', t.wpos),
+                        const SizedBox(height: 4),
+                        _CoordRow('机械', t.mpos, grey: true),
+                        if (t.originSet) ...[
+                          const SizedBox(height: 4),
+                          const Text('✓ 原点已设', style: TextStyle(fontSize: 11, color: Color(0xFF19B36B))),
+                        ],
+                        if (t.levelProgress > 0 && t.levelProgress < 1) ...[
+                          const SizedBox(height: 6),
+                          Text('找平 ${(t.levelProgress * 100).round()}%',
+                              style: const TextStyle(fontSize: 11, color: Colors.orange)),
+                          LinearProgressIndicator(value: t.levelProgress, minHeight: 4,
+                              color: Colors.orange, backgroundColor: Colors.orange.shade100),
+                        ],
+                        const SizedBox(height: 6),
+                        Text(t.doorOpen ? '门：开' : '门：关',
+                            style: TextStyle(fontSize: 11, color: t.doorOpen ? Colors.orange : Colors.grey)),
+                        if (t.alarmCode > 0)
+                          Text('报警: ${t.alarmCode}', style: const TextStyle(fontSize: 11, color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // ── 当前任务进度 ──
+          if (active) ...[
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Text('任务：${t.jobName.isEmpty ? "—" : t.jobName}',
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      Text('${(t.progress * 100).round()}%', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                    ]),
+                    const SizedBox(height: 6),
+                    LinearProgressIndicator(value: t.progress, minHeight: 8, color: statusColor(t.status)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+
+          // ── 手动移动（点动）──
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('手动移动（点动）', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    const Text('步长', style: TextStyle(fontSize: 13)),
+                    const SizedBox(width: 8),
+                    ChoiceChip(label: const Text('1 mm'), selected: _jogStep == 1,
+                        onSelected: (_) => setState(() => _jogStep = 1)),
+                    const SizedBox(width: 8),
+                    ChoiceChip(label: const Text('0.1 mm'), selected: _jogStep == 0.1,
+                        onSelected: (_) => setState(() => _jogStep = 0.1)),
+                    const SizedBox(width: 8),
+                    ChoiceChip(label: const Text('10 mm'), selected: _jogStep == 10,
+                        onSelected: (_) => setState(() => _jogStep = 10)),
+                  ]),
+                  const SizedBox(height: 10),
+                  JogPad(step: _jogStep, onJog: _jog),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // ── 机器操作按钮 ──
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('机器操作', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                  const SizedBox(height: 10),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    _OpBtn('回零', Icons.home, () => appState.sendCmd('\$H')),
+                    _OpBtn('主轴开', Icons.bolt, () => appState.sendCmd('M3 S12000')),
+                    _OpBtn('主轴关', Icons.power_off, () => appState.sendCmd('M5')),
+                    _OpBtn('吹气开', Icons.air, () => appState.sendCmd('M8')),
+                    _OpBtn('吹气关', Icons.air, () => appState.sendCmd('M9')),
+                    _OpBtn('暂停', Icons.pause, () => appState.sendCmd('!')),
+                    _OpBtn('继续', Icons.play_arrow, () => appState.sendCmd('~')),
+                    _OpBtn('急停', Icons.stop_circle, () => appState.sendCmd('\x18'), danger: true),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // ── 已选模型快捷入口 ──
+          if (appState.selected != null)
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              child: ListTile(
+                leading: const Icon(Icons.check_circle, color: Color(0xFF19B36B)),
+                title: Text('已选模型：${appState.selected!.title}'),
+                subtitle: const Text('点击前往准备雕刻'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.of(c).push(MaterialPageRoute(
+                      builder: (_) => PrepareScreen(model: appState.selected!)));
+                },
+              ),
+            ),
+
+          // ── 模型库快捷入口 ──
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: ListTile(
+              leading: const Icon(Icons.library_books, color: Color(0xFF19B36B)),
+              title: const Text('浏览模型库'),
+              subtitle: Text('共 ${appState.models.length} 个模型'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                c.findAncestorStateOfType<_SmartCncAppState>()?.goTo(1);
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoordRow extends StatelessWidget {
+  final String label;
+  final List<double> vals;
+  final bool grey;
+  const _CoordRow(this.label, this.vals, {this.grey = false});
+  @override
+  Widget build(BuildContext c) => RichText(
+    text: TextSpan(
+      children: [
+        TextSpan(text: '$label  ', style: TextStyle(fontSize: 11,
+            color: grey ? Colors.grey : Colors.black87, fontWeight: FontWeight.w500)),
+        TextSpan(text: 'X ${vals[0].toStringAsFixed(2)}  ', style: TextStyle(
+            fontSize: 11, color: grey ? Colors.grey.shade500 : Colors.black87,
+            fontFamily: 'monospace')),
+        TextSpan(text: 'Y ${vals[1].toStringAsFixed(2)}  ', style: TextStyle(
+            fontSize: 11, color: grey ? Colors.grey.shade500 : Colors.black87,
+            fontFamily: 'monospace')),
+        TextSpan(text: 'Z ${vals[2].toStringAsFixed(2)}', style: TextStyle(
+            fontSize: 11, color: grey ? Colors.grey.shade500 : Colors.black87,
+            fontFamily: 'monospace')),
+      ],
+    ),
+  );
+}
+
+// ── 首页（保留兼容，但不再作为默认页面）───────────────────────
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
   @override
@@ -838,7 +1097,7 @@ class HomeScreen extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: _HomeBtn(Icons.gamepad, '控制台', () {
-              c.findAncestorStateOfType<_SmartCncAppState>()?.goTo(2);
+              c.findAncestorStateOfType<_SmartCncAppState>()?.goTo(0);
             }),
           ),
         ]),
@@ -1663,7 +1922,7 @@ class _MoreScreenState extends State<MoreScreen> {
   @override
   Widget build(BuildContext c) {
     return ListView(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.only(left: 14, right: 14, top: 14, bottom: 120),
       children: [
         Card(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
