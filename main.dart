@@ -853,7 +853,7 @@ class _MonitorControlScreenState extends State<MonitorControlScreen> {
                         const SizedBox(height: 6),
                         Text(t.doorOpen ? '门：开' : '门：关',
                             style: TextStyle(fontSize: 11, color: t.doorOpen ? Colors.orange : Colors.grey)),
-                        if (t.alarmCode > 0)
+                        if (t.alarmCode.isNotEmpty)
                           Text('报警: ${t.alarmCode}', style: const TextStyle(fontSize: 11, color: Colors.red)),
                       ],
                     ),
