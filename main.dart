@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -25,6 +26,51 @@ import 'package:vector_math/vector_math.dart' as vm;
 void main() => runApp(const SmartCncApp());
 
 final AppState appState = AppState();
+
+// ── 局域网自动发现 ──────────────────────────────────────────────
+// 电脑端模拟器在 UDP 5001 周期性广播自己的存在，也会回应探针。
+// App 监听广播 + 主动发探针，拿到第一个响应即返回其 IP（失败返回 null，退回手动）。
+Future<String?> discoverSimulator({Duration timeout = const Duration(seconds: 4)}) async {
+  RawDatagramSocket? sock;
+  try {
+    sock = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 5001);
+    sock.broadcastEnabled = true;
+  } catch (e) {
+    return null; // 无法开 UDP 监听（如权限/端口占用），退回手动输入
+  }
+  final completer = Completer<String?>();
+  Timer? kill;
+  void finish(String? ip) {
+    if (completer.isCompleted) return;
+    kill?.cancel();
+    try {
+      sock?.close();
+    } catch (_) {}
+    completer.complete(ip);
+  }
+
+  kill = Timer(timeout, () => finish(null));
+  sock.listen((event) {
+    final dg = sock!.receive();
+    if (dg == null) return;
+    try {
+      final msg = utf8.decode(dg.data);
+      final d = jsonDecode(msg);
+      if (d is Map && d['type'] == 'smartcnc' && d['ip'] is String) {
+        finish(d['ip'] as String);
+      }
+    } catch (_) {}
+  });
+  // 主动探针多发几次，提升命中率
+  final probe = utf8.encode('SMARTCNC_DISCOVER');
+  for (int i = 0; i < 4; i++) {
+    try {
+      sock.send(probe, InternetAddress('255.255.255.255'), 5001);
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 350));
+  }
+  return completer.future;
+}
 
 // ── 模型库条目 ───────────────────────────────────────────────
 class ModelItem {
@@ -1902,6 +1948,7 @@ class _MoreScreenState extends State<MoreScreen> {
   late TextEditingController _ip;
   late TextEditingController _port;
   late TextEditingController _video;
+  bool _scanning = false;
 
   @override
   void initState() {
@@ -1909,6 +1956,15 @@ class _MoreScreenState extends State<MoreScreen> {
     _ip = TextEditingController(text: appState.ip);
     _port = TextEditingController(text: appState.port.toString());
     _video = TextEditingController(text: appState.videoUrl);
+    // 进入连接页自动扫一次：仅当用户还没手动改过 IP 时自动填入
+    final cur = _ip.text.trim();
+    if (cur.isEmpty || cur == '192.168.1.100' || cur == '192.168.1.22') {
+      discoverSimulator().then((ip) {
+        if (ip != null && mounted && _ip.text.trim() == cur) {
+          setState(() => _ip.text = ip);
+        }
+      });
+    }
   }
 
   @override
@@ -1939,6 +1995,34 @@ class _MoreScreenState extends State<MoreScreen> {
                 TextField(controller: _ip, decoration: const InputDecoration(labelText: '电脑 IP', border: OutlineInputBorder())),
                 const SizedBox(height: 10),
                 TextField(controller: _port, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '端口', border: OutlineInputBorder())),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: _scanning
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.wifi_find),
+                    label: Text(_scanning ? '扫描中…' : '扫描局域网自动发现'),
+                    onPressed: _scanning
+                        ? null
+                        : () async {
+                            setState(() => _scanning = true);
+                            final ip = await discoverSimulator();
+                            if (!mounted) return;
+                            setState(() => _scanning = false);
+                            if (ip != null) {
+                              _ip.text = ip;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('已发现电脑端：$ip')),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('未找到，请手动输入 IP（确保模拟器已打开且同 Wi-Fi）')),
+                              );
+                            }
+                          },
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Row(children: [
                   Expanded(
