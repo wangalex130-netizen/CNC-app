@@ -1890,8 +1890,8 @@ class _Model3DPainter extends CustomPainter {
     // 视图矩阵 lookAt（右手系，相机看向 -z）—— 手动构造，避免依赖 vector_math 顶层导出
     final up = vm.Vector3(0, 0, 1);
     final zaxis = (eye - target).normalized();
-    final xaxis = vm.Vector3.cross(up, zaxis).normalized();
-    final yaxis = vm.Vector3.cross(zaxis, xaxis);
+    final xaxis = up.cross(zaxis).normalized();
+    final yaxis = zaxis.cross(xaxis);
     final view = vm.Matrix4.zero();
     view.setEntry(0, 0, xaxis.x); view.setEntry(1, 0, yaxis.x); view.setEntry(2, 0, zaxis.x);
     view.setEntry(0, 1, xaxis.y); view.setEntry(1, 1, yaxis.y); view.setEntry(2, 1, zaxis.y);
