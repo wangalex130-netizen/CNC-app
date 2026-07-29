@@ -1887,9 +1887,28 @@ class _Model3DPainter extends CustomPainter {
       target.y + dist * cos(el) * cos(az),
       target.z + dist * sin(el),
     );
-    final look = vm.lookAt(eye, target, vm.Vector3(0, 0, 1));
-    final persp = vm.perspective(0.7853, w / h, 1.0, dist * 6 + 1000);
-    final vp = persp * look;
+    // 视图矩阵 lookAt（右手系，相机看向 -z）—— 手动构造，避免依赖 vector_math 顶层导出
+    final up = vm.Vector3(0, 0, 1);
+    final zaxis = (eye - target).normalized();
+    final xaxis = vm.Vector3.cross(up, zaxis).normalized();
+    final yaxis = vm.Vector3.cross(zaxis, xaxis);
+    final view = vm.Matrix4.zero();
+    view.setEntry(0, 0, xaxis.x); view.setEntry(1, 0, yaxis.x); view.setEntry(2, 0, zaxis.x);
+    view.setEntry(0, 1, xaxis.y); view.setEntry(1, 1, yaxis.y); view.setEntry(2, 1, zaxis.y);
+    view.setEntry(0, 2, xaxis.z); view.setEntry(1, 2, yaxis.z); view.setEntry(2, 2, zaxis.z);
+    view.setEntry(0, 3, -xaxis.dot(eye)); view.setEntry(1, 3, -yaxis.dot(eye)); view.setEntry(2, 3, -zaxis.dot(eye));
+    view.setEntry(3, 3, 1.0);
+    // 透视投影矩阵（OpenGL 风格，clip.w = -z_view）
+    final f = 1.0 / tan(0.7853 / 2);
+    final aspect = w / h;
+    final near = 1.0, far = dist * 6 + 1000;
+    final proj = vm.Matrix4.zero();
+    proj.setEntry(0, 0, f / aspect);
+    proj.setEntry(1, 1, f);
+    proj.setEntry(2, 2, (far + near) / (near - far));
+    proj.setEntry(2, 3, (2 * far * near) / (near - far));
+    proj.setEntry(3, 2, -1.0);
+    final vp = proj * view;
 
     // 平台网格
     final grid = Paint()..color = const Color(0x333A4554)..strokeWidth = 1;
